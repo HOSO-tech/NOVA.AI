@@ -289,7 +289,7 @@ app.get("/api/health", (req, res) => {
     ok: true,
     name: "NOVAAA AI",
     server: "online",
-    version: "5.0.0",
+    version: "6.0.0",
     timestamp: new Date().toISOString()
   });
 });
@@ -299,7 +299,7 @@ app.get("/api/status", (req, res) => {
     ok: true,
     name: "NOVAAA AI",
     server: "online",
-    version: "5.0.0",
+    version: "6.0.0",
     providers: providerReady(),
     connections: {
       youtube: Boolean(req.session.youtubeConnected),
@@ -702,6 +702,28 @@ app.post("/api/video/create", asyncHandler(async (req, res) => {
   });
 }));
 
+
+/* -------------------- NOVAAA BACKGROUND TASKS -------------------- */
+// Lightweight in-process task runner. Jobs survive page navigation, but not a server restart.
+const agentJobs = new Map();
+function publicJob(job) { return { id: job.id, title: job.title, status: job.status, progress: job.progress, result: job.result || null, error: job.error || null, createdAt: job.createdAt, updatedAt: job.updatedAt }; }
+app.get("/api/agent/jobs", (req, res) => res.json({ ok: true, jobs: [...agentJobs.values()].sort((a,b) => b.createdAt.localeCompare(a.createdAt)).map(publicJob) }));
+app.post("/api/agent/jobs", asyncHandler(async (req, res) => {
+  const task = cleanText(req.body?.task, 8000);
+  if (!task) return res.status(400).json({ ok:false, error:"Describe the task first." });
+  const job = { id: crypto.randomUUID(), title: cleanText(req.body?.title || task, 100), task, status:"queued", progress:0, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() };
+  agentJobs.set(job.id, job);
+  res.status(202).json({ ok:true, job:publicJob(job), note:"This lightweight worker runs while this server process is awake; it is not a durable cloud worker." });
+  setImmediate(async () => {
+    try { job.status="running"; job.progress=15; job.updatedAt=new Date().toISOString();
+      const answer = await askGemini(`Complete this task carefully. If it is a creative task, provide a finished usable result.\n\nTASK: ${job.task}`, mainPrompt);
+      job.result=answer; job.progress=100; job.status="completed";
+    } catch (error) { job.error=error.message || "Task failed"; job.status="failed"; }
+    job.updatedAt=new Date().toISOString();
+  });
+}));
+app.post("/api/agent/jobs/:id/cancel", (req,res) => { const job=agentJobs.get(req.params.id); if(!job) return res.status(404).json({ok:false,error:"Task not found."}); if(job.status==="queued") job.status="cancelled"; else if(job.status==="running") return res.status(409).json({ok:false,error:"This task is already running and cannot be safely interrupted."}); job.updatedAt=new Date().toISOString(); return res.json({ok:true,job:publicJob(job)}); });
+
 /* -------------------- FALLBACKS & ERRORS -------------------- */
 
 app.get("/api/*", (req, res) => {
@@ -727,7 +749,7 @@ app.get("*", (req, res, next) => {
 
 app.listen(port, "0.0.0.0", () => {
   console.log("======================================");
-  console.log(" NOVAAA AI V5.0.0");
+  console.log(" NOVAAA AI V6.0.0");
   console.log(` Server running on port ${port}`);
   console.log(` Providers: ${JSON.stringify(providerReady())}`);
   console.log(` Features listed: ${features.length}`);
