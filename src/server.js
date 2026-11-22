@@ -14,84 +14,49 @@ const app = express();
 const port = process.env.PORT || 3000;
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
+const baseUrl = () =>
+  (process.env.APP_BASE_URL || `http://localhost:${port}`).replace(/\/$/, "");
+
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "2mb" }));
 
 app.use(session({
-  secret: process.env.SESSION_SECRET || "change-this-session-secret",
+  secret: process.env.SESSION_SECRET || "replace-this-with-a-long-random-secret",
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     sameSite: "lax",
     secure: "auto",
-    maxAge: 24 * 60 * 60 * 1000
+    maxAge: 86400000
   }
 }));
 
 app.use(express.static(path.join(dir, "../public")));
 
-const baseUrl = () =>
-  (process.env.APP_BASE_URL || `http://localhost:${port}`).replace(/\/$/, "");
+/* ================= SYSTEM ================= */
 
-/* ================= AI PROVIDERS ================= */
+const mainPrompt = `
+You are NOVAAA AI, an intelligent creative assistant.
 
-const providerReady = () => ({
-  claude: !!process.env.ANTHROPIC_API_KEY,
-  gemini: !!process.env.GEMINI_API_KEY,
-  openai: !!process.env.OPENAI_API_KEY
-});
+Your responsibilities:
+- Story writing
+- Horror and mystery writing
+- Screenplays
+- Character creation
+- World building
+- YouTube content
+- Instagram content
+- Video concepts
+- Animation planning
+- Creator tools
+- Content production
+- Creative brainstorming
 
-async function askClaude(message, systemPrompt) {
-  const client = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY
-  });
-
-  const response = await client.messages.create({
-    model: process.env.CLAUDE_MODEL || "claude-3-5-sonnet-20241022",
-    max_tokens: 2000,
-    system: systemPrompt,
-    messages: [{ role: "user", content: message }]
-  });
-
-  return response.content
-    .filter(item => item.type === "text")
-    .map(item => item.text)
-    .join("\n");
-}
-
-async function askGemini(message, systemPrompt) {
-  const client = new GoogleGenerativeAI(
-    process.env.GEMINI_API_KEY
-  );
-
-  const model = client.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
-    systemInstruction: systemPrompt
-  });
-
-  const result = await model.generateContent(message);
-
-  return result.response.text();
-}
-
-async function askOpenAI(message, systemPrompt) {
-  const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-  });
-
-  const response = await client.chat.completions.create({
-    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: message }
-    ]
-  });
-
-  return response.choices[0]?.message?.content || "";
-}
-
-/* ================= FEATURE REGISTRY ================= */
+Be creative, accurate and helpful.
+Follow the user's requested language.
+Never pretend to perform actions you cannot perform.
+`;
 
 const features = [
   "AI Chat",
@@ -210,33 +175,137 @@ const features = [
   "System Health"
 ];
 
-/* ================= SYSTEM PROMPT ================= */
+/* ================= PROVIDERS ================= */
 
-const mainPrompt = `
-You are NOVAAA AI, an intelligent creative assistant.
+const providerReady = () => ({
+  gemini: !!process.env.GEMINI_API_KEY,
+  claude: !!process.env.ANTHROPIC_API_KEY,
+  openai: !!process.env.OPENAI_API_KEY
+});
 
-You help users with:
-- Stories and screenplays
-- Horror, mystery and suspense
-- Characters and world-building
-- YouTube and Instagram content
-- Video concepts and animation planning
-- Dialogue, narration and voiceover
-- Creative brainstorming and production planning
+/* GEMINI */
 
-Be helpful, creative and clear.
-Follow the user's requested language and format.
-Do not claim to have performed actions that you have not performed.
-`;
+async function askGemini(message, systemPrompt) {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("Gemini API key is missing.");
+  }
 
-/* ================= HEALTH AND STATUS ================= */
+  const client = new GoogleGenerativeAI(
+    process.env.GEMINI_API_KEY
+  );
+
+  const model = client.getGenerativeModel({
+    model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
+    systemInstruction: systemPrompt
+  });
+
+  let lastError;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const result = await model.generateContent(message);
+      return result.response.text();
+    } catch (error) {
+      lastError = error;
+
+      const temporary =
+        /503|429|500|502|504|overload|high demand/i.test(
+          String(error.message)
+        );
+
+      if (!temporary || attempt === 2) break;
+
+      await new Promise(resolve =>
+        setTimeout(resolve, 1000 * (2 ** attempt))
+      );
+    }
+  }
+
+  throw lastError;
+}
+
+/* CLAUDE */
+
+async function askClaude(message, systemPrompt) {
+  const client = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY
+  });
+
+  const response = await client.messages.create({
+    model: process.env.CLAUDE_MODEL ||
+      "claude-3-5-sonnet-20241022",
+    max_tokens: 2000,
+    system: systemPrompt,
+    messages: [
+      { role: "user", content: message }
+    ]
+  });
+
+  return response.content
+    .filter(item => item.type === "text")
+    .map(item => item.text)
+    .join("\n");
+}
+
+/* OPENAI */
+
+async function askOpenAI(message, systemPrompt) {
+  const client = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+  });
+
+  const response = await client.chat.completions.create({
+    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: message }
+    ]
+  });
+
+  return response.choices[0]?.message?.content || "";
+}
+
+/* PROVIDER ROUTER */
+
+async function askProvider(provider, message, systemPrompt) {
+  if (provider === "gemini") {
+    return askGemini(message, systemPrompt);
+  }
+
+  if (provider === "claude") {
+    return askClaude(message, systemPrompt);
+  }
+
+  if (provider === "openai") {
+    return askOpenAI(message, systemPrompt);
+  }
+
+  throw new Error("Unknown AI provider.");
+}
+
+/* ================= RESPONSE COMPATIBILITY ================= */
+
+function sendAIResult(res, provider, answer, extra = {}) {
+  return res.json({
+    ok: true,
+    provider,
+    answer,
+    reply: answer,
+    result: answer,
+    response: answer,
+    message: answer,
+    ...extra
+  });
+}
+
+/* ================= STATUS ================= */
 
 app.get("/api/health", (_, res) => {
   res.json({
     ok: true,
     name: "NOVAAA AI",
     server: "online",
-    version: "3.0.1",
+    version: "3.1.0",
     timestamp: new Date().toISOString()
   });
 });
@@ -245,8 +314,8 @@ app.get("/api/status", (req, res) => {
   res.json({
     ok: true,
     name: "NOVAAA AI",
-    version: "3.0.1",
     server: "online",
+    version: "3.1.0",
     providers: providerReady(),
     connections: {
       youtube: !!req.session.youtubeConnected,
@@ -279,7 +348,8 @@ app.post("/api/chat", async (req, res) => {
       message,
       provider = "gemini",
       systemPrompt = "",
-      feature = ""
+      feature = "",
+      history = []
     } = req.body || {};
 
     if (!message || typeof message !== "string") {
@@ -296,43 +366,33 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
-    const available = providerReady();
-
-    if (!["claude", "gemini", "openai"].includes(provider)) {
-      return res.status(400).json({
-        ok: false,
-        error: "Unknown AI provider."
-      });
-    }
-
-    if (!available[provider]) {
-      return res.status(400).json({
-        ok: false,
-        error: `${provider} is not configured. Add its API key in Render environment variables.`
-      });
-    }
-
     const instruction = [
       mainPrompt,
-      feature ? `Current creative tool: ${feature}.` : "",
+      feature ? `Current tool: ${feature}` : "",
       systemPrompt
     ].filter(Boolean).join("\n\n");
 
-    let answer;
+    const recent = Array.isArray(history)
+      ? history.slice(-8).map(item => {
+          const role = item?.role === "assistant"
+            ? "Assistant"
+            : "User";
 
-    if (provider === "claude") {
-      answer = await askClaude(message, instruction);
-    } else if (provider === "gemini") {
-      answer = await askGemini(message, instruction);
-    } else {
-      answer = await askOpenAI(message, instruction);
-    }
+          return `${role}: ${String(item?.content || "").slice(0, 3000)}`;
+        }).join("\n")
+      : "";
 
-    res.json({
-      ok: true,
+    const prompt = recent
+      ? `Recent conversation:\n${recent}\n\nUser:\n${message}`
+      : message;
+
+    const answer = await askProvider(
       provider,
-      answer
-    });
+      prompt,
+      instruction
+    );
+
+    sendAIResult(res, provider, answer);
 
   } catch (error) {
     console.error("AI CHAT ERROR:", error);
@@ -344,65 +404,50 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-/* ================= CREATIVE COMMAND ROUTER ================= */
+/* ================= COMMAND CENTRE ================= */
 
 app.post("/api/command", async (req, res) => {
   try {
     const {
       command,
-      input,
-      provider = "gemini"
+      input = "",
+      prompt = "",
+      provider = "gemini",
+      feature = ""
     } = req.body || {};
 
-    if (!command || !input) {
+    const task = String(command || prompt || "").trim();
+    const userInput = String(input || "").trim();
+
+    if (!task && !userInput) {
       return res.status(400).json({
         ok: false,
-        error: "A command and input are required."
+        error: "Enter a command or prompt."
       });
     }
 
-    if (!["claude", "gemini", "openai"].includes(provider)) {
-      return res.status(400).json({
-        ok: false,
-        error: "Unknown provider."
-      });
-    }
+    const fullPrompt = `
+NOVAAA CREATIVE TASK: ${feature || task}
 
-    if (!providerReady()[provider]) {
-      return res.status(400).json({
-        ok: false,
-        error: `${provider} is not configured.`
-      });
-    }
+Task:
+${task}
 
-    const prompt = `
-You are NOVAAA AI's creative command system.
+User input:
+${userInput}
 
-Perform this task: ${command}
-
-User's input:
-${input}
-
-Give a complete, useful result.
-Use headings when appropriate.
-Do not include unnecessary introductions.
+Complete the task directly.
+Use headings where useful.
+Follow the user's requested language.
 `;
 
-    let answer;
-
-    if (provider === "claude") {
-      answer = await askClaude(prompt, mainPrompt);
-    } else if (provider === "gemini") {
-      answer = await askGemini(prompt, mainPrompt);
-    } else {
-      answer = await askOpenAI(prompt, mainPrompt);
-    }
-
-    res.json({
-      ok: true,
-      command,
+    const answer = await askProvider(
       provider,
-      answer
+      fullPrompt,
+      mainPrompt
+    );
+
+    sendAIResult(res, provider, answer, {
+      command: task
     });
 
   } catch (error) {
@@ -415,7 +460,123 @@ Do not include unnecessary introductions.
   }
 });
 
-/* ================= YOUTUBE OAUTH ================= */
+/* ================= PROJECT MEMORY ================= */
+
+const memoryBySession = new Map();
+
+function getMemories(req) {
+  if (!memoryBySession.has(req.sessionID)) {
+    memoryBySession.set(req.sessionID, []);
+  }
+
+  return memoryBySession.get(req.sessionID);
+}
+
+app.get("/api/memory", (req, res) => {
+  const memories = getMemories(req);
+
+  res.json({
+    ok: true,
+    memories,
+    projects: memories
+  });
+});
+
+app.post("/api/memory", (req, res) => {
+  const { title, content } = req.body || {};
+
+  if (!title || !content) {
+    return res.status(400).json({
+      ok: false,
+      error: "Title and content are required."
+    });
+  }
+
+  const memories = getMemories(req);
+
+  const memory = {
+    id: crypto.randomUUID(),
+    title: String(title).slice(0, 160),
+    content: String(content).slice(0, 10000),
+    createdAt: new Date().toISOString()
+  };
+
+  memories.unshift(memory);
+
+  res.json({
+    ok: true,
+    memory,
+    memories
+  });
+});
+
+app.delete("/api/memory/:id", (req, res) => {
+  const memories = getMemories(req);
+
+  const updated = memories.filter(
+    item => item.id !== req.params.id
+  );
+
+  memoryBySession.set(req.sessionID, updated);
+
+  res.json({
+    ok: true,
+    memories: updated
+  });
+});
+
+/* PROJECT COMPATIBILITY */
+
+app.get("/api/projects", (req, res) => {
+  res.json({
+    ok: true,
+    projects: getMemories(req)
+  });
+});
+
+app.post("/api/projects", (req, res) => {
+  const { name, content = "" } = req.body || {};
+
+  if (!name) {
+    return res.status(400).json({
+      ok: false,
+      error: "Project name is required."
+    });
+  }
+
+  const projects = getMemories(req);
+
+  const project = {
+    id: crypto.randomUUID(),
+    name: String(name).slice(0, 160),
+    title: String(name).slice(0, 160),
+    content: String(content).slice(0, 10000),
+    createdAt: new Date().toISOString()
+  };
+
+  projects.unshift(project);
+
+  res.json({
+    ok: true,
+    project,
+    projects
+  });
+});
+
+app.delete("/api/projects/:id", (req, res) => {
+  const updated = getMemories(req).filter(
+    item => item.id !== req.params.id
+  );
+
+  memoryBySession.set(req.sessionID, updated);
+
+  res.json({
+    ok: true,
+    projects: updated
+  });
+});
+
+/* ================= YOUTUBE ================= */
 
 const youtubeReady = () =>
   !!(
@@ -429,7 +590,7 @@ const youtubeRedirectUri = () =>
 app.get("/auth/youtube", async (req, res) => {
   if (!youtubeReady()) {
     return res.status(400).send(
-      "YouTube OAuth is not configured. Check your Render environment variables."
+      "YouTube OAuth is not configured."
     );
   }
 
@@ -439,31 +600,29 @@ app.get("/auth/youtube", async (req, res) => {
 
   try {
     await new Promise((resolve, reject) => {
-      req.session.save(error => {
-        if (error) reject(error);
-        else resolve();
-      });
+      req.session.save(error =>
+        error ? reject(error) : resolve()
+      );
     });
 
     const params = new URLSearchParams({
       client_id: process.env.GOOGLE_CLIENT_ID,
       redirect_uri: youtubeRedirectUri(),
       response_type: "code",
-      scope: [
-        "https://www.googleapis.com/auth/youtube.readonly",
-        "https://www.googleapis.com/auth/youtube.upload"
-      ].join(" "),
+      scope:
+        "https://www.googleapis.com/auth/youtube.readonly " +
+        "https://www.googleapis.com/auth/youtube.upload",
       access_type: "offline",
       prompt: "consent",
       state
     });
 
     res.redirect(
-      `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
+      `https://accounts.google.com/o/oauth2/v2/auth?${params}`
     );
 
   } catch (error) {
-    console.error("YOUTUBE SESSION ERROR:", error);
+    console.error(error);
     res.status(500).send("Could not start YouTube connection.");
   }
 });
@@ -478,20 +637,17 @@ app.get("/auth/youtube/callback", async (req, res) => {
 
     if (
       !state ||
-      !req.session.youtubeOAuthState ||
       state !== req.session.youtubeOAuthState
     ) {
       return res.status(403).send(
-        "Invalid OAuth state. Please try connecting again."
+        "Invalid OAuth state. Try connecting again."
       );
     }
 
     delete req.session.youtubeOAuthState;
 
     if (!code) {
-      return res.status(400).send(
-        "Missing Google authorisation code."
-      );
+      return res.status(400).send("Missing authorisation code.");
     }
 
     const response = await fetch(
@@ -517,26 +673,22 @@ app.get("/auth/youtube/callback", async (req, res) => {
       console.error("GOOGLE TOKEN ERROR:", tokens);
 
       return res.status(400).send(
-        "Google token exchange failed. Check your OAuth credentials."
+        "Google token exchange failed."
       );
     }
 
     req.session.youtubeConnected = true;
 
-    // Token persistence is not implemented yet.
-    // YouTube publishing is not enabled by this connection alone.
-
     await new Promise((resolve, reject) => {
-      req.session.save(error => {
-        if (error) reject(error);
-        else resolve();
-      });
+      req.session.save(error =>
+        error ? reject(error) : resolve()
+      );
     });
 
     res.redirect("/?youtube=connected");
 
   } catch (error) {
-    console.error("YOUTUBE CALLBACK ERROR:", error);
+    console.error("YOUTUBE CALLBACK:", error);
     res.status(500).send("YouTube connection failed.");
   }
 });
@@ -567,7 +719,7 @@ app.post("/api/youtube/disconnect", (req, res) => {
   });
 });
 
-/* ================= INSTAGRAM STATUS ================= */
+/* ================= INSTAGRAM ================= */
 
 app.get("/api/instagram/status", (_, res) => {
   const configured = !!(
@@ -580,70 +732,32 @@ app.get("/api/instagram/status", (_, res) => {
     configured,
     connected: false,
     message: configured
-      ? "Instagram credentials are configured. OAuth flow still needs setup."
-      : "Instagram credentials have not been configured."
+      ? "Credentials detected. OAuth still needs implementation."
+      : "Instagram credentials are not configured."
   });
 });
 
-/* ================= PROJECT MEMORY ================= */
-
-const projectMemory = new Map();
-
-app.get("/api/projects", (req, res) => {
-  const projects = projectMemory.get(req.sessionID) || [];
-
-  res.json({
-    ok: true,
-    projects
-  });
-});
-
-app.post("/api/projects", (req, res) => {
-  const { name, content = "" } = req.body || {};
-
-  if (!name || typeof name !== "string") {
-    return res.status(400).json({
-      ok: false,
-      error: "Project name is required."
-    });
-  }
-
-  const projects = projectMemory.get(req.sessionID) || [];
-
-  const project = {
-    id: crypto.randomUUID(),
-    name,
-    content,
-    updatedAt: new Date().toISOString()
-  };
-
-  projects.push(project);
-  projectMemory.set(req.sessionID, projects);
-
-  res.json({
-    ok: true,
-    project
-  });
-});
-
-app.delete("/api/projects/:id", (req, res) => {
-  const projects = projectMemory.get(req.sessionID) || [];
-
-  const updated = projects.filter(
-    project => project.id !== req.params.id
+app.get("/auth/instagram", (_, res) => {
+  res.status(501).send(
+    "Instagram OAuth has not been implemented yet."
   );
+});
 
-  projectMemory.set(req.sessionID, updated);
+/* ================= SOCIAL STATUS ================= */
 
+app.get("/api/social/status", (req, res) => {
   res.json({
     ok: true,
-    projects: updated
+    youtube: !!req.session.youtubeConnected,
+    youtubeConnected: !!req.session.youtubeConnected,
+    instagram: false,
+    instagramConnected: false
   });
 });
 
 /* ================= FALLBACK ================= */
 
-app.get("*", (req, res, next) => {
+app.get("*", (req, res) => {
   if (req.path.startsWith("/api/")) {
     return res.status(404).json({
       ok: false,
@@ -651,15 +765,21 @@ app.get("*", (req, res, next) => {
     });
   }
 
-  res.sendFile(path.join(dir, "../public/index.html"));
+  res.sendFile(
+    path.join(dir, "../public/index.html")
+  );
 });
 
-/* ================= START SERVER ================= */
+/* ================= START ================= */
 
 app.listen(port, () => {
   console.log("--------------------------------");
-  console.log("NOVAAA AI V3.0.1");
+  console.log("NOVAAA AI V3.1.0");
   console.log(`Server running on port ${port}`);
-  console.log(`Features registered: ${features.length}`);
+  console.log(`Features listed: ${features.length}`);
+  console.log(
+    "Gemini model:",
+    process.env.GEMINI_MODEL || "gemini-3.8-flash"
+  );
   console.log("--------------------------------");
 });
