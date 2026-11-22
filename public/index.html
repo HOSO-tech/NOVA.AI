@@ -1014,4 +1014,1573 @@
             <div class="messages" id="messages">
 
               <div class="message ai">
-                Hey! I'
+                Hey! I'm NOVAAA. Tell me what you want to create.
+              </div>
+
+            </div>
+
+            <div class="chat-input">
+
+              <textarea
+                id="chatInput"
+                placeholder="Ask NOVAAA anything..."
+              ></textarea>
+
+              <button class="btn primary" onclick="sendChat()">
+                Send
+              </button>
+
+            </div>
+
+          </div>
+
+          <div class="card side-settings">
+
+            <div class="section-title">
+              <h3>AI Settings</h3>
+            </div>
+
+            <div>
+              <label>Provider</label>
+
+              <select id="chatProvider">
+                <option value="claude">Claude</option>
+                <option value="gemini">Gemini</option>
+                <option value="openai">OpenAI</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Feature</label>
+
+              <input
+                id="chatFeature"
+                value="AI Chat"
+                placeholder="Feature name"
+              />
+            </div>
+
+            <button class="btn" onclick="clearChat()">
+              Clear Chat
+            </button>
+
+            <div class="card" style="margin-top:15px;padding:13px">
+              <small style="color:var(--muted)">
+                API keys stay on the server. Never put provider keys
+                inside this HTML file.
+              </small>
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- ================= COMMAND CENTRE ================= -->
+
+      <section class="page" id="page-command">
+
+        <div class="hero">
+
+          <div class="eyebrow">COMMAND CENTRE</div>
+
+          <h2>Tell NOVAAA what to do.</h2>
+
+          <p>
+            Use natural language. NOVAAA routes your request to the
+            appropriate creator feature.
+          </p>
+
+          <div class="command-box">
+
+            <input
+              id="commandInput"
+              placeholder="Example: Create a terrifying 60-second YouTube story"
+            />
+
+            <button class="btn primary" onclick="runCommand()">
+              Execute
+            </button>
+
+          </div>
+
+          <div class="command-result" id="commandResult">
+            Waiting for command...
+          </div>
+
+        </div>
+
+        <div class="card mt">
+
+          <div class="section-title">
+
+            <h3>Feature Library</h3>
+
+            <span id="featureLibraryCount">
+              Loading features...
+            </span>
+
+          </div>
+
+          <input
+            class="feature-search"
+            id="featureSearch"
+            placeholder="Search features..."
+            oninput="filterFeatures()"
+          />
+
+          <div class="feature-grid" id="featureGrid">
+            Loading...
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- ================= STORY ================= -->
+
+      <section class="page" id="page-story">
+
+        <div class="section-title">
+
+          <div>
+            <h3>Story & Script Studio</h3>
+            <span>Generate stories, scripts and scenes</span>
+          </div>
+
+        </div>
+
+        <div class="grid grid-2">
+
+          <div class="card">
+
+            <div class="studio-controls">
+
+              <div>
+                <label style="color:var(--muted);font-size:11px">
+                  Type
+                </label>
+
+                <select id="storyType">
+                  <option>Horror Story</option>
+                  <option>Mystery Story</option>
+                  <option>Thriller Story</option>
+                  <option>YouTube Script</option>
+                  <option>Short Film</option>
+                  <option>Reel Script</option>
+                  <option>Story Outline</option>
+                </select>
+
+              </div>
+
+              <div>
+                <label style="color:var(--muted);font-size:11px">
+                  Length
+                </label>
+
+                <select id="storyLength">
+                  <option>Short</option>
+                  <option>Medium</option>
+                  <option>Long</option>
+                </select>
+
+              </div>
+
+            </div>
+
+            <textarea
+              id="storyPrompt"
+              style="margin-top:12px"
+              placeholder="Describe your story idea..."
+            ></textarea>
+
+            <button
+              class="btn primary"
+              style="margin-top:10px"
+              onclick="generateStory()"
+            >
+              Generate
+            </button>
+
+          </div>
+
+          <div class="card">
+
+            <div class="section-title">
+              <h3>Generated Output</h3>
+              <button class="btn" onclick="copyOutput('storyOutput')">
+                Copy
+              </button>
+            </div>
+
+            <div class="output" id="storyOutput">
+              Your story will appear here.
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- ================= PROMPTS ================= -->
+
+      <section class="page" id="page-prompts">
+
+        <div class="section-title">
+
+          <div>
+            <h3>Creator Prompt Builder</h3>
+            <span>Build prompts for your content workflow</span>
+          </div>
+
+        </div>
+
+        <div class="grid grid-2">
+
+          <div class="card">
+
+            <input
+              id="promptSubject"
+              placeholder="Subject / idea"
+            />
+
+            <select id="promptType" style="margin-top:10px">
+              <option>Video Prompt</option>
+              <option>Image Prompt</option>
+              <option>Thumbnail Prompt</option>
+              <option>Voiceover Prompt</option>
+              <option>Animation Prompt</option>
+              <option>Character Prompt</option>
+              <option>Scene Prompt</option>
+            </select>
+
+            <textarea
+              id="promptDetails"
+              style="margin-top:10px"
+              placeholder="Style, mood, camera, lighting, environment..."
+            ></textarea>
+
+            <button
+              class="btn primary"
+              style="margin-top:10px"
+              onclick="buildPrompt()"
+            >
+              Build Prompt
+            </button>
+
+          </div>
+
+          <div class="card">
+
+            <div class="section-title">
+              <h3>Prompt</h3>
+              <button class="btn" onclick="copyOutput('promptOutput')">
+                Copy
+              </button>
+            </div>
+
+            <div class="output" id="promptOutput">
+              Your creator prompt will appear here.
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- ================= PLANNER ================= -->
+
+      <section class="page" id="page-planner">
+
+        <div class="section-title">
+
+          <div>
+            <h3>Content Planner</h3>
+            <span>Your local creator calendar</span>
+          </div>
+
+          <button class="btn danger" onclick="clearPlanner()">
+            Clear
+          </button>
+
+        </div>
+
+        <div class="card">
+
+          <div class="planner-row">
+
+            <input id="planDate" type="date" />
+
+            <input
+              id="planTitle"
+              placeholder="Content title"
+            />
+
+            <select id="planPlatform">
+              <option>YouTube</option>
+              <option>Instagram</option>
+              <option>Shorts</option>
+              <option>Reels</option>
+              <option>Other</option>
+            </select>
+
+            <button class="btn primary" onclick="addPlan()">
+              Add
+            </button>
+
+          </div>
+
+          <div class="planner-list" id="plannerList"></div>
+
+        </div>
+
+      </section>
+
+
+      <!-- ================= MEMORY ================= -->
+
+      <section class="page" id="page-memory">
+
+        <div class="section-title">
+
+          <div>
+            <h3>Project Memory</h3>
+            <span>Save useful information for your current session</span>
+          </div>
+
+        </div>
+
+        <div class="grid grid-2">
+
+          <div class="card">
+
+            <input
+              id="memoryTitle"
+              placeholder="Memory title"
+            />
+
+            <textarea
+              id="memoryContent"
+              style="margin-top:10px"
+              placeholder="Character details, story rules, project notes..."
+            ></textarea>
+
+            <button
+              class="btn primary"
+              style="margin-top:10px"
+              onclick="saveMemory()"
+            >
+              Save Memory
+            </button>
+
+          </div>
+
+          <div class="card">
+
+            <div class="section-title">
+              <h3>Saved Memories</h3>
+              <button class="btn" onclick="loadMemories()">
+                Refresh
+              </button>
+            </div>
+
+            <div class="memory-list" id="memoryList">
+              Loading...
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- ================= SOCIAL ================= -->
+
+      <section class="page" id="page-social">
+
+        <div class="section-title">
+
+          <div>
+            <h3>YouTube & Instagram</h3>
+            <span>Connect supported creator accounts</span>
+          </div>
+
+        </div>
+
+        <div class="card">
+
+          <div class="connection">
+
+            <div>
+              <h4>YouTube</h4>
+              <p>Connect your Google/YouTube account.</p>
+            </div>
+
+            <div>
+
+              <span
+                class="connection-status"
+                id="youtubeStatus"
+              >
+                Checking...
+              </span>
+
+              <button
+                class="btn primary"
+                onclick="connectSocial('youtube')"
+              >
+                Connect
+              </button>
+
+            </div>
+
+          </div>
+
+          <div class="connection">
+
+            <div>
+              <h4>Instagram</h4>
+              <p>Requires the appropriate Meta/Instagram setup.</p>
+            </div>
+
+            <div>
+
+              <span
+                class="connection-status"
+                id="instagramStatus"
+              >
+                Checking...
+              </span>
+
+              <button
+                class="btn primary"
+                onclick="connectSocial('instagram')"
+              >
+                Connect
+              </button>
+
+            </div>
+
+          </div>
+
+          <div class="card" style="margin-top:15px">
+
+            <small style="color:var(--muted);line-height:1.6">
+              NOVAAA only uses the permissions configured by your
+              server-side OAuth setup. Connecting an account does not
+              automatically publish content or access private data
+              outside those permissions.
+            </small>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- ================= CONNECTIONS ================= -->
+
+      <section class="page" id="page-connections">
+
+        <div class="section-title">
+
+          <div>
+            <h3>Connections</h3>
+            <span>AI provider and social connection status</span>
+          </div>
+
+          <button class="btn" onclick="loadStatus()">
+            Refresh
+          </button>
+
+        </div>
+
+        <div class="grid grid-2">
+
+          <div class="card">
+
+            <div class="section-title">
+              <h3>AI Providers</h3>
+            </div>
+
+            <div id="providerStatus">
+              Loading...
+            </div>
+
+          </div>
+
+          <div class="card">
+
+            <div class="section-title">
+              <h3>Social</h3>
+            </div>
+
+            <div id="connectionStatus">
+              Loading...
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+    </div>
+
+  </main>
+
+</div>
+
+<div id="toast"></div>
+
+
+<script>
+  /* ============================================================
+     NOVAAA AI FRONTEND
+     Connects to src/server.js
+     ============================================================ */
+
+  const state = {
+    history: [],
+    features: [],
+    status: null
+  };
+
+
+  /* =========================
+     BASIC HELPERS
+     ========================= */
+
+  function $(id) {
+    return document.getElementById(id);
+  }
+
+  function escapeHTML(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function toast(message) {
+    const el = $("toast");
+
+    el.textContent = message;
+    el.classList.add("show");
+
+    clearTimeout(window.__toastTimer);
+
+    window.__toastTimer = setTimeout(() => {
+      el.classList.remove("show");
+    }, 2600);
+  }
+
+  async function api(url, options = {}) {
+
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      }
+    });
+
+    const text = await response.text();
+
+    let data;
+
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = {
+        error: text || "Invalid server response"
+      };
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data.error ||
+        data.message ||
+        `Request failed (${response.status})`
+      );
+    }
+
+    return data;
+  }
+
+
+  /* =========================
+     PAGE NAVIGATION
+     ========================= */
+
+  function openPage(page) {
+
+    document.querySelectorAll(".page").forEach(el => {
+      el.classList.remove("active");
+    });
+
+    document.querySelectorAll(".nav-btn").forEach(el => {
+      el.classList.remove("active");
+    });
+
+    const target = $("page-" + page);
+
+    if (!target) return;
+
+    target.classList.add("active");
+
+    const nav = document.querySelector(
+      `.nav-btn[data-page="${page}"]`
+    );
+
+    if (nav) {
+      nav.classList.add("active");
+    }
+
+    const title = nav
+      ? nav.textContent.trim()
+      : page;
+
+    $("currentPageTitle").textContent = title;
+
+    $("sidebar").classList.remove("open");
+
+    if (page === "memory") {
+      loadMemories();
+    }
+
+    if (page === "social" || page === "connections") {
+      loadSocialStatus();
+    }
+
+    if (page === "command") {
+      loadFeatures();
+    }
+  }
+
+
+  document.querySelectorAll(".nav-btn").forEach(button => {
+
+    button.addEventListener("click", () => {
+      openPage(button.dataset.page);
+    });
+
+  });
+
+
+  $("mobileMenu").addEventListener("click", () => {
+    $("sidebar").classList.toggle("open");
+  });
+
+
+  /* =========================
+     STATUS
+     ========================= */
+
+  async function loadStatus() {
+
+    try {
+
+      const data = await api("/api/status");
+
+      state.status = data;
+
+      $("apiStatus").textContent = "● Backend Online";
+      $("apiStatus").style.color = "var(--success)";
+
+      $("backendText").textContent =
+        "API and workspace ready";
+
+      const providers =
+        data.providers || {};
+
+      $("providerStatus").innerHTML = Object.entries(providers)
+        .map(([name, ready]) => `
+          <div class="connection">
+            <div>
+              <strong>${escapeHTML(name)}</strong>
+              <p>${ready ? "API key detected" : "API key not configured"}</p>
+            </div>
+            <span class="connection-status ${ready ? "connected" : ""}">
+              ${ready ? "READY" : "OFFLINE"}
+            </span>
+          </div>
+        `)
+        .join("");
+
+      const features =
+        data.features ||
+        data.featureCount ||
+        120;
+
+      if (typeof features === "number") {
+        $("featureCount").textContent = features + "+";
+      }
+
+      $("systemInfo").innerHTML = `
+        <div style="line-height:1.9;color:var(--muted);font-size:13px">
+          <div><strong style="color:white">Backend:</strong> Online</div>
+          <div><strong style="color:white">Version:</strong> ${escapeHTML(data.version || "3.0.0")}</div>
+          <div><strong style="color:white">AI:</strong> Server-side</div>
+          <div><strong style="color:white">Command Router:</strong> Ready</div>
+        </div>
+      `;
+
+    } catch (error) {
+
+      $("apiStatus").textContent = "● Backend Error";
+      $("apiStatus").style.color = "var(--danger)";
+
+      $("backendText").textContent =
+        "Could not reach API";
+
+      $("systemInfo").innerHTML = `
+        <span style="color:var(--danger)">
+          ${escapeHTML(error.message)}
+        </span>
+      `;
+    }
+  }
+
+
+  /* =========================
+     FEATURES
+     ========================= */
+
+  async function loadFeatures() {
+
+    try {
+
+      const data = await api("/api/features");
+
+      state.features =
+        Array.isArray(data)
+          ? data
+          : data.features || [];
+
+      renderFeatures();
+
+      $("featureLibraryCount").textContent =
+        `${state.features.length} features`;
+
+      $("featureCount").textContent =
+        `${state.features.length}+`;
+
+    } catch (error) {
+
+      $("featureGrid").innerHTML = `
+        <div style="color:var(--danger)">
+          ${escapeHTML(error.message)}
+        </div>
+      `;
+
+    }
+  }
+
+
+  function renderFeatures(filter = "") {
+
+    const grid = $("featureGrid");
+
+    const items = state.features.filter(feature => {
+
+      const name =
+        typeof feature === "string"
+          ? feature
+          : feature.name || "";
+
+      return name
+        .toLowerCase()
+        .includes(filter.toLowerCase());
+
+    });
+
+    if (!items.length) {
+
+      grid.innerHTML = `
+        <div style="color:var(--muted)">
+          No matching features.
+        </div>
+      `;
+
+      return;
+    }
+
+    grid.innerHTML = items.map(feature => {
+
+      const name =
+        typeof feature === "string"
+          ? feature
+          : feature.name || "Feature";
+
+      const description =
+        typeof feature === "object"
+          ? feature.description || "NOVAAA creator feature"
+          : "NOVAAA creator feature";
+
+      return `
+        <button
+          class="feature-item"
+          onclick="useFeature(${JSON.stringify(name)})"
+        >
+          <strong>${escapeHTML(name)}</strong>
+          <small>${escapeHTML(description)}</small>
+        </button>
+      `;
+
+    }).join("");
+  }
+
+
+  function filterFeatures() {
+
+    renderFeatures(
+      $("featureSearch").value
+    );
+
+  }
+
+
+  function useFeature(name) {
+
+    openPage("command");
+
+    $("commandInput").value =
+      `Use the ${name} feature to help me create something.`;
+
+    $("commandInput").focus();
+
+  }
+
+
+  /* =========================
+     COMMAND CENTRE
+     ========================= */
+
+  async function runCommand() {
+
+    const input =
+      $("commandInput").value.trim();
+
+    if (!input) {
+      toast("Enter a command first.");
+      return;
+    }
+
+    $("commandResult").textContent =
+      "NOVAAA is working...";
+
+    try {
+
+      const data = await api("/api/command", {
+        method: "POST",
+        body: JSON.stringify({
+          command: input
+        })
+      });
+
+      const result =
+        data.result ||
+        data.response ||
+        data.message ||
+        "No result returned.";
+
+      $("commandResult").textContent = result;
+
+    } catch (error) {
+
+      $("commandResult").textContent =
+        "Error: " + error.message;
+
+      toast(error.message);
+    }
+  }
+
+
+  async function runQuickCommand() {
+
+    const input =
+      $("quickCommand").value.trim();
+
+    if (!input) {
+      toast("Enter a command.");
+      return;
+    }
+
+    $("quickResult").textContent =
+      "Working...";
+
+    try {
+
+      const data = await api("/api/command", {
+        method: "POST",
+        body: JSON.stringify({
+          command: input
+        })
+      });
+
+      $("quickResult").textContent =
+        data.result ||
+        data.response ||
+        data.message ||
+        "No result.";
+
+    } catch (error) {
+
+      $("quickResult").textContent =
+        "Error: " + error.message;
+
+    }
+  }
+
+
+  $("commandInput").addEventListener(
+    "keydown",
+    event => {
+
+      if (
+        event.key === "Enter" &&
+        !event.shiftKey
+      ) {
+        event.preventDefault();
+        runCommand();
+      }
+
+    }
+  );
+
+
+  $("quickCommand").addEventListener(
+    "keydown",
+    event => {
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        runQuickCommand();
+      }
+
+    }
+  );
+
+
+  /* =========================
+     AI CHAT
+     ========================= */
+
+  function addMessage(type, text) {
+
+    const box = $("messages");
+
+    const div =
+      document.createElement("div");
+
+    div.className =
+      "message " + type;
+
+    div.textContent = text;
+
+    box.appendChild(div);
+
+    box.scrollTop = box.scrollHeight;
+  }
+
+
+  async function sendChat() {
+
+    const input =
+      $("chatInput");
+
+    const message =
+      input.value.trim();
+
+    if (!message) return;
+
+    const provider =
+      $("chatProvider").value;
+
+    const feature =
+      $("chatFeature").value.trim() ||
+      "AI Chat";
+
+    addMessage("user", message);
+
+    input.value = "";
+
+    addMessage("ai", "Thinking...");
+
+    const thinking =
+      $("messages").lastElementChild;
+
+    try {
+
+      const data = await api("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          provider,
+          message,
+          history: state.history,
+          feature
+        })
+      });
+
+      const reply =
+        data.reply ||
+        data.response ||
+        data.result ||
+        "No response.";
+
+      thinking.textContent = reply;
+
+      state.history.push({
+        role: "user",
+        content: message
+      });
+
+      state.history.push({
+        role: "assistant",
+        content: reply
+      });
+
+    } catch (error) {
+
+      thinking.textContent =
+        "Error: " + error.message;
+
+    }
+  }
+
+
+  $("chatInput").addEventListener(
+    "keydown",
+    event => {
+
+      if (
+        event.key === "Enter" &&
+        !event.shiftKey
+      ) {
+        event.preventDefault();
+        sendChat();
+      }
+
+    }
+  );
+
+
+  function clearChat() {
+
+    state.history = [];
+
+    $("messages").innerHTML = `
+      <div class="message ai">
+        Chat cleared. What should we create next?
+      </div>
+    `;
+
+  }
+
+
+  /* =========================
+     STORY GENERATOR
+     ========================= */
+
+  async function generateStory() {
+
+    const type =
+      $("storyType").value;
+
+    const length =
+      $("storyLength").value;
+
+    const prompt =
+      $("storyPrompt").value.trim();
+
+    if (!prompt) {
+      toast("Describe your story idea first.");
+      return;
+    }
+
+    $("storyOutput").textContent =
+      "Creating your story...";
+
+    try {
+
+      const data = await api("/api/command", {
+        method: "POST",
+        body: JSON.stringify({
+          command:
+            `Create a ${length} ${type}. Idea: ${prompt}`
+        })
+      });
+
+      $("storyOutput").textContent =
+        data.result ||
+        data.response ||
+        data.message ||
+        "No story generated.";
+
+    } catch (error) {
+
+      $("storyOutput").textContent =
+        "Error: " + error.message;
+
+    }
+  }
+
+
+  /* =========================
+     PROMPT BUILDER
+     ========================= */
+
+  async function buildPrompt() {
+
+    const subject =
+      $("promptSubject").value.trim();
+
+    const type =
+      $("promptType").value;
+
+    const details =
+      $("promptDetails").value.trim();
+
+    if (!subject) {
+      toast("Enter a subject first.");
+      return;
+    }
+
+    $("promptOutput").textContent =
+      "Building prompt...";
+
+    try {
+
+      const data = await api("/api/command", {
+        method: "POST",
+        body: JSON.stringify({
+          command:
+            `Create a professional ${type} for "${subject}". Details: ${details}`
+        })
+      });
+
+      $("promptOutput").textContent =
+        data.result ||
+        data.response ||
+        data.message ||
+        "No prompt generated.";
+
+    } catch (error) {
+
+      $("promptOutput").textContent =
+        "Error: " + error.message;
+
+    }
+  }
+
+
+  /* =========================
+     COPY
+     ========================= */
+
+  async function copyOutput(id) {
+
+    const text =
+      $(id).textContent;
+
+    try {
+
+      await navigator.clipboard.writeText(text);
+
+      toast("Copied.");
+
+    } catch {
+
+      toast("Copy failed.");
+    }
+  }
+
+
+  /* =========================
+     MEMORY
+     ========================= */
+
+  async function loadMemories() {
+
+    try {
+
+      const data =
+        await api("/api/memory");
+
+      const memories =
+        Array.isArray(data)
+          ? data
+          : data.memories || [];
+
+      $("memoryCount").textContent =
+        memories.length;
+
+      if (!memories.length) {
+
+        $("memoryList").innerHTML = `
+          <div style="color:var(--muted)">
+            No memories saved yet.
+          </div>
+        `;
+
+        return;
+      }
+
+      $("memoryList").innerHTML =
+        memories.map((memory, index) => {
+
+          const title =
+            memory.title ||
+            `Memory ${index + 1}`;
+
+          const content =
+            memory.content ||
+            memory.text ||
+            "";
+
+          return `
+            <div class="memory-item">
+              <strong>${escapeHTML(title)}</strong>
+              <p>${escapeHTML(content)}</p>
+            </div>
+          `;
+
+        }).join("");
+
+    } catch (error) {
+
+      $("memoryList").innerHTML = `
+        <div style="color:var(--danger)">
+          ${escapeHTML(error.message)}
+        </div>
+      `;
+
+    }
+  }
+
+
+  async function saveMemory() {
+
+    const title =
+      $("memoryTitle").value.trim();
+
+    const content =
+      $("memoryContent").value.trim();
+
+    if (!title || !content) {
+
+      toast("Enter a title and memory.");
+
+      return;
+    }
+
+    try {
+
+      await api("/api/memory", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          content
+        })
+      });
+
+      $("memoryTitle").value = "";
+      $("memoryContent").value = "";
+
+      toast("Memory saved.");
+
+      loadMemories();
+
+    } catch (error) {
+
+      toast(error.message);
+
+    }
+  }
+
+
+  /* =========================
+     PLANNER
+     ========================= */
+
+  function getPlanner() {
+
+    try {
+
+      return JSON.parse(
+        localStorage.getItem(
+          "novaaa_planner"
+        ) || "[]"
+      );
+
+    } catch {
+
+      return [];
+    }
+  }
+
+
+  function savePlanner(items) {
+
+    localStorage.setItem(
+      "novaaa_planner",
+      JSON.stringify(items)
+    );
+
+  }
+
+
+  function renderPlanner() {
+
+    const list =
+      $("plannerList");
+
+    const items =
+      getPlanner();
+
+    if (!items.length) {
+
+      list.innerHTML = `
+        <div style="color:var(--muted)">
+          No content planned yet.
+        </div>
+      `;
+
+      return;
+    }
+
+    items.sort((a,b) =>
+      String(a.date).localeCompare(
+        String(b.date)
+      )
+    );
+
+    list.innerHTML =
+      items.map((item,index) => `
+
+        <div class="planner-item">
+
+          <span>
+            ${escapeHTML(item.date)}
+          </span>
+
+          <strong>
+            ${escapeHTML(item.title)}
+          </strong>
+
+          <span style="color:var(--muted)">
+            ${escapeHTML(item.platform)}
+          </span>
+
+          <button
+            class="btn danger"
+            onclick="deletePlan(${index})"
+          >
+            Delete
+          </button>
+
+        </div>
+
+      `).join("");
+
+  }
+
+
+  function addPlan() {
+
+    const date =
+      $("planDate").value;
+
+    const title =
+      $("planTitle").value.trim();
+
+    const platform =
+      $("planPlatform").value;
+
+    if (!date || !title) {
+
+      toast("Add a date and title.");
+
+      return;
+    }
+
+    const items =
+      getPlanner();
+
+    items.push({
+      date,
+      title,
+      platform
+    });
+
+    savePlanner(items);
+
+    $("planDate").value = "";
+    $("planTitle").value = "";
+
+    renderPlanner();
+
+    toast("Content added.");
+  }
+
+
+  function deletePlan(index) {
+
+    const items =
+      getPlanner();
+
+    items.splice(index, 1);
+
+    savePlanner(items);
+
+    renderPlanner();
+  }
+
+
+  function clearPlanner() {
+
+    if (!confirm("Clear your planner?")) {
+      return;
+    }
+
+    localStorage.removeItem(
+      "novaaa_planner"
+    );
+
+    renderPlanner();
+  }
+
+
+  /* =========================
+     SOCIAL
+     ========================= */
+
+  async function loadSocialStatus() {
+
+    try {
+
+      const data =
+        await api("/api/social/status");
+
+      const youtube =
+        data.youtube ||
+        data.youtubeConnected ||
+        false;
+
+      const instagram =
+        data.instagram ||
+        data.instagramConnected ||
+        false;
+
+      updateSocialUI(
+        "youtube",
+        !!youtube
+      );
+
+      updateSocialUI(
+        "instagram",
+        !!instagram
+      );
+
+      const count =
+        Number(!!youtube) +
+        Number(!!instagram);
+
+      $("socialCount").textContent =
+        count;
+
+      $("connectionStatus").innerHTML = `
+        <div class="connection">
+          <strong>YouTube</strong>
+          <span class="connection-status ${youtube ? "connected" : ""}">
+            ${youtube ? "CONNECTED" : "NOT CONNECTED"}
+          </span>
+        </div>
+
+        <div class="connection">
+          <strong>Instagram</strong>
+          <span class="connection-status ${instagram ? "connected" : ""}">
+            ${instagram ? "CONNECTED" : "NOT CONNECTED"}
+          </span>
+        </div>
+      `;
+
+    } catch (error) {
+
+      $("connectionStatus").innerHTML = `
+        <span style="color:var(--danger)">
+          ${escapeHTML(error.message)}
+        </span>
+      `;
+
+    }
+  }
+
+
+  function updateSocialUI(
+    provider,
+    connected
+  ) {
+
+    const el =
+      $(provider + "Status");
+
+    if (!el) return;
+
+    el.textContent =
+      connected
+        ? "CONNECTED"
+        : "NOT CONNECTED";
+
+    el.classList.toggle(
+      "connected",
+      connected
+    );
+  }
+
+
+  function connectSocial(provider) {
+
+    window.location.href =
+      "/auth/" + provider;
+  }
+
+
+  /* =========================
+     INITIALISE
+     ========================= */
+
+  async function initialise() {
+
+    renderPlanner();
+
+    await loadStatus();
+
+    await loadFeatures();
+
+    await loadMemories();
+
+    await loadSocialStatus();
+
+  }
+
+
+  initialise();
+
+</script>
+
+</body>
+</html>
