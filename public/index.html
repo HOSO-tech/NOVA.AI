@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#120b10" />
+  <meta name="theme-color" content="#eeeeef" />
   <title>NOVAAA AI — Command Centre</title>
 
   <style>
@@ -779,6 +779,23 @@
         flex-direction: column;
       }
     }
+
+    /* NOVAAA V6 — silver-first premium workspace */
+    :root { --bg:#e9e9ec; --panel:#ffffff; --panel2:#f5f5f7; --panel3:#ececef; --silver:#29272c; --silver2:#625e66; --muted:#77727b; --border:rgba(52,35,44,.13); --shadow:0 18px 50px rgba(42,28,36,.09); }
+    body { background: radial-gradient(circle at 85% 0%,rgba(121,43,73,.09),transparent 28%),linear-gradient(135deg,#f5f5f6,#e4e4e8); color:#29272c; }
+    .sidebar { background:rgba(250,250,251,.96); border-right:1px solid rgba(50,35,45,.12); }
+    .topbar { background:rgba(247,247,249,.88); border-bottom:1px solid var(--border); }
+    .nav button { color:#625e66; } .nav button:hover { background:rgba(121,43,73,.07);color:#38202b; }
+    .nav button.active { color:#57253b;background:linear-gradient(90deg,rgba(121,43,73,.15),rgba(121,43,73,.035)); }
+    .card,.hero { background:rgba(255,255,255,.88); border-color:rgba(52,35,44,.12); box-shadow:var(--shadow); }
+    .message.ai { background:#f0eef1;color:#28242a; } .message.user { background:#742d49;color:#fff; }
+    input,textarea,select { background:#fff!important;color:#28242a!important;border-color:rgba(52,35,44,.18)!important; }
+    .sidebar-footer { background:#f5f3f5; }
+    .v6-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px; }
+    .v6-field { display:flex;flex-direction:column;gap:7px;margin:12px 0; } .v6-field label {font-size:12px;color:#6c6670;font-weight:700;}
+    .v6-result { white-space:pre-wrap;line-height:1.65;background:#f5f3f5;border:1px solid var(--border);padding:16px;border-radius:14px;min-height:90px;margin-top:14px;color:#302b32; }
+    .v6-note {font-size:12px;color:#77717a;line-height:1.5;margin-top:10px;}
+    @media(max-width:760px){.v6-grid{grid-template-columns:1fr;}}
   </style>
 </head>
 
@@ -809,6 +826,14 @@
       <button class="nav-btn" data-page="chat">
         <span class="nav-icon">✦</span>
         AI Chat
+      </button>
+
+      <button class="nav-btn" data-page="video">
+        <span class="nav-icon">▶</span> Video Studio
+      </button>
+
+      <button class="nav-btn" data-page="agent">
+        <span class="nav-icon">✧</span> Background Agent
       </button>
 
       <button class="nav-btn" data-page="command">
@@ -996,6 +1021,30 @@
       </section>
 
 
+      <!-- ================= V6 VIDEO STUDIO ================= -->
+      <section class="page" id="page-video">
+        <div class="section-title"><div><h3>Video Studio</h3><span>Turn an idea into a storyboard video</span></div></div>
+        <div class="card">
+          <div class="v6-field"><label>What video should NOVAAA create?</label><textarea id="v6VideoPrompt" rows="4" placeholder="Example: A mysterious horror short about a phone receiving messages from tomorrow..."></textarea></div>
+          <div class="v6-grid">
+            <div class="v6-field"><label>Visual style</label><select id="v6Style"><option value="cinematic horror">Cinematic horror</option><option value="anime">Anime</option><option value="realistic">Realistic</option><option value="dark mystery">Dark mystery</option><option value="fantasy">Fantasy</option><option value="documentary">Documentary</option></select></div>
+            <div class="v6-field"><label>Language</label><select id="v6Language"><option>Hindi</option><option>Hinglish</option><option>English</option></select></div>
+            <div class="v6-field"><label>Duration</label><select id="v6Duration"><option value="30">30 seconds</option><option value="45">45 seconds</option><option value="60">1 minute</option><option value="90">90 seconds</option></select></div>
+            <div class="v6-field"><label>Scenes</label><select id="v6Scenes"><option>5</option><option>6</option><option>8</option><option>10</option></select></div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px"><button class="btn primary" onclick="v6CreateVideo(false)">✦ Create video</button><button class="btn" onclick="v6CreateVideo(true)">↻ Punchy — make a completely new version</button></div>
+          <p class="v6-note">Current engine creates an MP4 scene-card storyboard with text, not generated moving footage or voice audio. True AI footage requires a separate hosted video provider.</p>
+          <div class="v6-result" id="v6VideoResult">Your video plan and render link will appear here.</div>
+        </div>
+      </section>
+
+      <!-- ================= V6 BACKGROUND AGENT ================= -->
+      <section class="page" id="page-agent">
+        <div class="section-title"><div><h3>Background Agent</h3><span>Send a task and check its progress</span></div><button class="btn" onclick="v6RefreshJobs()">Refresh</button></div>
+        <div class="card"><div class="v6-field"><label>Task for NOVAAA</label><textarea id="v6AgentTask" rows="4" placeholder="Example: Write a 5-part Hindi mystery series with a cliffhanger in every episode."></textarea></div><button class="btn primary" onclick="v6StartAgent()">Start task</button><p class="v6-note">This first version runs on the current server process. It can continue while you navigate around the site, but jobs are lost if the server restarts or sleeps. Durable always-on workers need a separate worker service and persistent storage.</p></div>
+        <div id="v6Jobs" class="v6-grid"></div>
+      </section>
+
       <!-- ================= AI CHAT ================= -->
 
       <section class="page" id="page-chat">
@@ -1044,8 +1093,8 @@
               <label>Provider</label>
 
               <select id="chatProvider">
-                <option value="claude">Claude</option>
-                <option value="gemini">Gemini</option>
+                <option value="gemini" selected>Gemini</option>
+                <option value="claude">Claude (API key required)</option>
                 <option value="openai">OpenAI</option>
               </select>
             </div>
@@ -2577,6 +2626,22 @@
 
   }
 
+
+
+  /* NOVAAA V6 tools */
+  async function v6CreateVideo(punchy) {
+    const promptEl=$("v6VideoPrompt"); let prompt=promptEl.value.trim();
+    if(!prompt){toast("Enter a video idea first.");promptEl.focus();return;}
+    const out=$("v6VideoResult");out.textContent=punchy?"Creating a completely new concept and storyboard...":"Planning your video...";
+    if(punchy) prompt=`Create a COMPLETELY DIFFERENT new version. Do not merely change colours or wording. Invent a fresh story premise, title, characters, plot twist and visual direction inspired only by this broad request: ${prompt}. Make it punchy and original.`;
+    try { const data=await api("/api/video/create",{method:"POST",body:JSON.stringify({prompt,style:$("v6Style").value,language:$("v6Language").value,duration:Number($("v6Duration").value),scenes:Number($("v6Scenes").value)})});
+      const plan=data.plan||{}; out.innerHTML=`<strong>${escapeHTML(plan.title||data.title||"Your video")}</strong><br>${escapeHTML(plan.description||"")}<br><br><strong>Scenes:</strong><br>${(plan.scenes||[]).map(x=>`${x.number}. ${escapeHTML(x.visual)} — ${escapeHTML(x.narration||"")}`).join("<br>")}<br><br><a class="btn primary" href="${escapeHTML(data.downloadUrl||data.video)}" target="_blank" rel="noopener">Open / download MP4</a><p class="v6-note">${escapeHTML(data.note||"")}</p>`;
+    } catch(e){out.textContent="Could not create video: "+e.message;}
+  }
+  async function v6StartAgent(){const task=$("v6AgentTask").value.trim();if(!task){toast("Describe the task first.");return;}try{const data=await api("/api/agent/jobs",{method:"POST",body:JSON.stringify({task})});$("v6AgentTask").value="";toast("Task started");await v6RefreshJobs();}catch(e){toast(e.message);}}
+  async function v6RefreshJobs(){const box=$("v6Jobs");if(!box)return;try{const data=await api("/api/agent/jobs");box.innerHTML=(data.jobs||[]).map(j=>`<div class="card"><strong>${escapeHTML(j.title)}</strong><p class="v6-note">${escapeHTML(j.status)} · ${j.progress}%</p><div class="v6-result">${escapeHTML(j.result||j.error||"Working..." )}</div>${j.status==="queued"?`<button class="btn" onclick="v6CancelJob('${j.id}')">Cancel</button>`:""}</div>`).join("")||"<div class='card'>No tasks yet.</div>";}catch(e){box.textContent=e.message;}}
+  async function v6CancelJob(id){try{await api(`/api/agent/jobs/${id}/cancel`,{method:"POST",body:"{}"});await v6RefreshJobs();}catch(e){toast(e.message);}}
+  setInterval(()=>{if($("page-agent")?.classList.contains("active"))v6RefreshJobs();},5000);
 
   initialise();
 
