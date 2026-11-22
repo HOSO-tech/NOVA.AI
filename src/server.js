@@ -27,10 +27,9 @@ for (const folder of [generatedDir, videoDir, sceneDir, dataDir]) {
   fs.mkdirSync(folder, { recursive: true });
 }
 
-const baseUrl = () =>
-  (process.env.APP_BASE_URL || `http://localhost:${port}`).replace(/\/$/, "");
-
 app.set("trust proxy", 1);
+app.disable("x-powered-by");
+
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
@@ -39,7 +38,7 @@ app.use(
     name: "novaaa.sid",
     secret:
       process.env.SESSION_SECRET ||
-      "change-this-session-secret-before-production",
+      crypto.randomBytes(48).toString("hex"),
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -51,8 +50,104 @@ app.use(
   })
 );
 
+// Basic security headers.
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=()"
+  );
+  next();
+});
+
+// In-memory rate limiter.
+function createRateLimiter({ windowMs, max, message }) {
+  const buckets = new Map();
+
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now();
+
+    for (const [key, bucket] of buckets) {
+      if (bucket.resetAt <= now) {
+        buckets.delete(key);
+      }
+    }
+  }, Math.min(windowMs, 60000));
+
+  cleanupTimer.unref?.();
+
+  return (req, res, next) => {
+    const key = req.ip || req.socket.remoteAddress || "unknown";
+    const now = Date.now();
+
+    let bucket = buckets.get(key);
+
+    if (!bucket || bucket.resetAt <= now) {
+      bucket = {
+        count: 0,
+        resetAt: now + windowMs
+      };
+
+      buckets.set(key, bucket);
+    }
+
+    bucket.count += 1;
+
+    res.setHeader("RateLimit-Limit", String(max));
+    res.setHeader(
+      "RateLimit-Remaining",
+      String(Math.max(0, max - bucket.count))
+    );
+
+    if (bucket.count > max) {
+      res.setHeader(
+        "Retry-After",
+        String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)))
+      );
+
+      return res.status(429).json({
+        ok: false,
+        error: message || "Too many requests. Please try again shortly."
+      });
+    }
+
+    next();
+  };
+}
+
+app.use(
+  "/api",
+  createRateLimiter({
+    windowMs: 60000,
+    max: 120,
+    message: "Too many API requests. Please wait a minute."
+  })
+);
+
+const aiRateLimit = createRateLimiter({
+  windowMs: 60000,
+  max: 12,
+  message: "Too many AI requests. Please wait before trying again."
+});
+
+const renderRateLimit = createRateLimiter({
+  windowMs: 60000,
+  max: 4,
+  message: "Too many video render requests. Please wait."
+});
+
 app.use(express.static(path.join(dir, "../public")));
-app.use("/generated", express.static(generatedDir));
+
+app.use(
+  "/generated",
+  express.static(generatedDir, {
+    dotfiles: "deny",
+    index: false,
+    maxAge: "1d"
+  })
+);
 
 /* -------------------- SYSTEM -------------------- */
 
@@ -114,41 +209,56 @@ const providerReady = () => ({
   openai: Boolean(process.env.OPENAI_API_KEY)
 });
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 async function askGemini(message, systemPrompt = mainPrompt) {
   if (!process.env.GEMINI_API_KEY) {
-    throw new Error("Gemini API key is missing. Add GEMINI_API_KEY in Render environment variables.");
+    throw new Error(
+      "Gemini API key is missing. Add GEMINI_API_KEY in Render environment variables."
+    );
   }
 
   const client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
   const model = client.getGenerativeModel({
     model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
     systemInstruction: systemPrompt
   });
 
   let lastError;
+
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const result = await model.generateContent(message);
       return result.response.text();
     } catch (error) {
       lastError = error;
-      const temporary = /503|429|500|502|504|overload|high demand|temporarily unavailable/i
-        .test(String(error?.message || error));
+
+      const temporary =
+        /503|429|500|502|504|overload|high demand|temporarily unavailable/i
+          .test(String(error?.message || error));
+
       if (!temporary || attempt === 2) break;
+
       await sleep(1000 * (2 ** attempt));
     }
   }
+
   throw lastError || new Error("Gemini request failed.");
 }
 
 async function askClaude(message, systemPrompt = mainPrompt) {
   if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error("Claude API key is missing. Add ANTHROPIC_API_KEY in Render environment variables.");
+    throw new Error(
+      "Claude API key is missing. Add ANTHROPIC_API_KEY in Render environment variables."
+    );
   }
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const client = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY
+  });
+
   const response = await client.messages.create({
     model: process.env.CLAUDE_MODEL || "claude-3-5-sonnet-20241022",
     max_tokens: 2500,
@@ -164,10 +274,15 @@ async function askClaude(message, systemPrompt = mainPrompt) {
 
 async function askOpenAI(message, systemPrompt = mainPrompt) {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OpenAI API key is missing. Add OPENAI_API_KEY in Render environment variables.");
+    throw new Error(
+      "OpenAI API key is missing. Add OPENAI_API_KEY in Render environment variables."
+    );
   }
 
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const client = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+  });
+
   const response = await client.chat.completions.create({
     model: process.env.OPENAI_MODEL || "gpt-4o-mini",
     messages: [
@@ -183,7 +298,10 @@ async function askProvider(provider, message, systemPrompt = mainPrompt) {
   if (provider === "gemini") return askGemini(message, systemPrompt);
   if (provider === "claude") return askClaude(message, systemPrompt);
   if (provider === "openai") return askOpenAI(message, systemPrompt);
-  throw new Error("Unknown AI provider. Choose gemini, claude or openai.");
+
+  throw new Error(
+    "Unknown AI provider. Choose gemini, claude or openai."
+  );
 }
 
 /* -------------------- RESPONSE HELPERS -------------------- */
@@ -215,7 +333,11 @@ function asyncHandler(handler) {
 function readProjects() {
   try {
     if (!fs.existsSync(projectsFile)) return [];
-    const parsed = JSON.parse(fs.readFileSync(projectsFile, "utf8"));
+
+    const parsed = JSON.parse(
+      fs.readFileSync(projectsFile, "utf8")
+    );
+
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
     console.error("PROJECT FILE READ ERROR:", error);
@@ -224,16 +346,42 @@ function readProjects() {
 }
 
 function writeProjects(projects) {
-  const temporaryFile = `${projectsFile}.tmp`;
-  fs.writeFileSync(temporaryFile, JSON.stringify(projects, null, 2), "utf8");
-  fs.renameSync(temporaryFile, projectsFile);
+  const temporaryFile = `${projectsFile}.${process.pid}.tmp`;
+
+  try {
+    fs.writeFileSync(
+      temporaryFile,
+      JSON.stringify(projects, null, 2),
+      {
+        encoding: "utf8",
+        mode: 0o600
+      }
+    );
+
+    fs.renameSync(temporaryFile, projectsFile);
+  } catch (error) {
+    try {
+      fs.rmSync(temporaryFile, { force: true });
+    } catch {}
+
+    throw new Error(
+      `Could not save Project Memory. Check DATA_DIR storage permissions. ${error.message}`
+    );
+  }
 }
 
 function listProjects(res) {
   const projects = readProjects().sort(
-    (a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)
+    (a, b) =>
+      new Date(b.updatedAt || b.createdAt) -
+      new Date(a.updatedAt || a.createdAt)
   );
-  return res.json({ ok: true, projects, memories: projects });
+
+  return res.json({
+    ok: true,
+    projects,
+    memories: projects
+  });
 }
 
 function createProject(req, res) {
@@ -249,6 +397,7 @@ function createProject(req, res) {
 
   const projects = readProjects();
   const now = new Date().toISOString();
+
   const project = {
     id: crypto.randomUUID(),
     title,
@@ -274,12 +423,24 @@ app.post("/api/memory", (req, res) => createProject(req, res));
 
 app.delete("/api/projects/:id", (req, res) => {
   const projects = readProjects();
-  const remaining = projects.filter((project) => project.id !== req.params.id);
+
+  const remaining = projects.filter(
+    (project) => project.id !== req.params.id
+  );
+
   if (remaining.length === projects.length) {
-    return res.status(404).json({ ok: false, error: "Project not found." });
+    return res.status(404).json({
+      ok: false,
+      error: "Project not found."
+    });
   }
+
   writeProjects(remaining);
-  return res.json({ ok: true, projects: remaining });
+
+  return res.json({
+    ok: true,
+    projects: remaining
+  });
 });
 
 /* -------------------- STATUS -------------------- */
@@ -289,7 +450,7 @@ app.get("/api/health", (req, res) => {
     ok: true,
     name: "NOVAAA AI",
     server: "online",
-    version: "6.0.0",
+    version: "6.1.0",
     timestamp: new Date().toISOString()
   });
 });
@@ -299,7 +460,7 @@ app.get("/api/status", (req, res) => {
     ok: true,
     name: "NOVAAA AI",
     server: "online",
-    version: "6.0.0",
+    version: "6.1.0",
     providers: providerReady(),
     connections: {
       youtube: Boolean(req.session.youtubeConnected),
@@ -329,69 +490,107 @@ app.get("/api/social/status", (req, res) => {
 });
 
 app.get("/api/providers", (req, res) => {
-  res.json({ ok: true, providers: providerReady() });
+  res.json({
+    ok: true,
+    providers: providerReady()
+  });
 });
 
 app.get("/api/features", (req, res) => {
-  res.json({ ok: true, count: features.length, features });
+  res.json({
+    ok: true,
+    count: features.length,
+    features
+  });
 });
 
 /* -------------------- AI CHAT -------------------- */
 
-app.post("/api/chat", asyncHandler(async (req, res) => {
-  const {
-    message,
-    provider = "gemini",
-    systemPrompt = "",
-    feature = "",
-    history = []
-  } = req.body || {};
+app.post(
+  "/api/chat",
+  aiRateLimit,
+  asyncHandler(async (req, res) => {
+    const {
+      message,
+      provider = "gemini",
+      systemPrompt = "",
+      feature = "",
+      history = []
+    } = req.body || {};
 
-  if (typeof message !== "string" || !message.trim()) {
-    return res.status(400).json({ ok: false, error: "Please enter a message." });
-  }
-  if (message.length > 15000) {
-    return res.status(400).json({ ok: false, error: "Message is too long." });
-  }
+    if (typeof message !== "string" || !message.trim()) {
+      return res.status(400).json({
+        ok: false,
+        error: "Please enter a message."
+      });
+    }
 
-  const instruction = [mainPrompt, feature ? `Current tool: ${cleanText(feature, 200)}` : "", cleanText(systemPrompt, 5000)]
-    .filter(Boolean)
-    .join("\n\n");
+    if (message.length > 15000) {
+      return res.status(400).json({
+        ok: false,
+        error: "Message is too long."
+      });
+    }
 
-  const recent = Array.isArray(history)
-    ? history.slice(-8).map((item) => {
-        const role = item?.role === "assistant" ? "Assistant" : "User";
-        return `${role}: ${cleanText(item?.content, 3000)}`;
-      }).join("\n")
-    : "";
+    const instruction = [
+      mainPrompt,
+      feature ? `Current tool: ${cleanText(feature, 200)}` : "",
+      cleanText(systemPrompt, 5000)
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
-  const prompt = recent
-    ? `Recent conversation:\n${recent}\n\nUser:\n${message.trim()}`
-    : message.trim();
+    const recent = Array.isArray(history)
+      ? history
+          .slice(-8)
+          .map((item) => {
+            const role =
+              item?.role === "assistant" ? "Assistant" : "User";
 
-  const answer = await askProvider(provider, prompt, instruction);
-  return sendAIResult(res, provider, answer);
-}));
+            return `${role}: ${cleanText(item?.content, 3000)}`;
+          })
+          .join("\n")
+      : "";
+
+    const prompt = recent
+      ? `Recent conversation:\n${recent}\n\nUser:\n${message.trim()}`
+      : message.trim();
+
+    const answer = await askProvider(
+      provider,
+      prompt,
+      instruction
+    );
+
+    return sendAIResult(res, provider, answer);
+  })
+);
 
 /* -------------------- COMMAND CENTRE -------------------- */
 
-app.post("/api/command", asyncHandler(async (req, res) => {
-  const {
-    command,
-    input = "",
-    prompt = "",
-    provider = "gemini",
-    feature = ""
-  } = req.body || {};
+app.post(
+  "/api/command",
+  aiRateLimit,
+  asyncHandler(async (req, res) => {
+    const {
+      command,
+      input = "",
+      prompt = "",
+      provider = "gemini",
+      feature = ""
+    } = req.body || {};
 
-  const task = cleanText(command || prompt, 12000);
-  const userInput = cleanText(input, 12000);
+    const task = cleanText(command || prompt, 12000);
+    const userInput = cleanText(input, 12000);
 
-  if (!task && !userInput) {
-    return res.status(400).json({ ok: false, error: "Enter a command or prompt." });
-  }
+    if (!task && !userInput) {
+      return res.status(400).json({
+        ok: false,
+        error: "Enter a command or prompt."
+      });
+    }
 
-  const fullPrompt = `
+    const fullPrompt = `
 NOVAAA CREATIVE TASK: ${cleanText(feature, 200) || task}
 
 Task:
@@ -404,9 +603,17 @@ Complete the task directly. Use headings where useful.
 Follow the user's requested language.
 `;
 
-  const answer = await askProvider(provider, fullPrompt, mainPrompt);
-  return sendAIResult(res, provider, answer, { command: task });
-}));
+    const answer = await askProvider(
+      provider,
+      fullPrompt,
+      mainPrompt
+    );
+
+    return sendAIResult(res, provider, answer, {
+      command: task
+    });
+  })
+);
 
 /* -------------------- VIDEO PLANNING -------------------- */
 
@@ -421,10 +628,14 @@ function extractJson(text) {
   } catch {
     const first = cleaned.indexOf("{");
     const last = cleaned.lastIndexOf("}");
+
     if (first >= 0 && last > first) {
       return JSON.parse(cleaned.slice(first, last + 1));
     }
-    throw new Error("The AI provider did not return valid video-plan JSON.");
+
+    throw new Error(
+      "The AI provider did not return valid video-plan JSON."
+    );
   }
 }
 
@@ -435,8 +646,15 @@ async function buildVideoPlan({
   style = "cinematic",
   scenes = 5
 }) {
-  const sceneCount = Math.max(3, Math.min(Number(scenes) || 5, 12));
-  const totalDuration = Math.max(6, Math.min(Number(duration) || 30, 180));
+  const sceneCount = Math.max(
+    3,
+    Math.min(Number(scenes) || 5, 12)
+  );
+
+  const totalDuration = Math.max(
+    6,
+    Math.min(Number(duration) || 30, 180)
+  );
 
   const planningPrompt = `
 You are NOVAAA Video Director.
@@ -466,70 +684,103 @@ Return ONLY valid JSON:
 `;
 
   let plan;
+
   try {
-    plan = extractJson(await askGemini(planningPrompt, mainPrompt));
+    plan = extractJson(
+      await askGemini(planningPrompt, mainPrompt)
+    );
   } catch (error) {
-    // A fallback plan is provided only for a planning response-format failure.
-    // Provider/API errors still surface to the user.
-    if (/API key is missing|quota|permission|unauthorized|not found|404|403|401/i.test(error.message)) {
+    if (
+      /API key is missing|quota|permission|unauthorized|not found|404|403|401/i
+        .test(error.message)
+    ) {
       throw error;
     }
-    const perScene = Math.max(2, Math.floor(totalDuration / sceneCount));
+
+    const perScene = Math.max(
+      2,
+      Math.floor(totalDuration / sceneCount)
+    );
+
     plan = {
       title: "NOVAAA Video",
       description: cleanText(prompt, 1000),
-      scenes: Array.from({ length: sceneCount }, (_, index) => ({
-        number: index + 1,
-        duration: perScene,
-        visual: `${cleanText(prompt, 400)} — scene ${index + 1}`,
-        camera: "Cinematic wide shot",
-        narration: "",
-        sound: "Atmospheric background sound"
-      }))
+      scenes: Array.from(
+        { length: sceneCount },
+        (_, index) => ({
+          number: index + 1,
+          duration: perScene,
+          visual: `${cleanText(prompt, 400)} — scene ${index + 1}`,
+          camera: "Cinematic wide shot",
+          narration: "",
+          sound: "Atmospheric background sound"
+        })
+      )
     };
   }
 
   if (!plan || !Array.isArray(plan.scenes) || !plan.scenes.length) {
-    throw new Error("The video planner returned an empty scene list.");
+    throw new Error(
+      "The video planner returned an empty scene list."
+    );
   }
 
   plan.title = cleanText(plan.title || "NOVAAA Video", 160);
-  plan.description = cleanText(plan.description || prompt, 1000);
-  plan.scenes = plan.scenes.slice(0, 12).map((scene, index) => ({
-    number: index + 1,
-    duration: Math.max(2, Math.min(Number(scene?.duration) || 4, 60)),
-    visual: cleanText(scene?.visual, 1200),
-    camera: cleanText(scene?.camera, 400),
-    narration: cleanText(scene?.narration, 1000),
-    sound: cleanText(scene?.sound, 400)
-  }));
+  plan.description = cleanText(
+    plan.description || prompt,
+    1000
+  );
+
+  plan.scenes = plan.scenes.slice(0, 12).map(
+    (scene, index) => ({
+      number: index + 1,
+      duration: Math.max(
+        2,
+        Math.min(Number(scene?.duration) || 4, 60)
+      ),
+      visual: cleanText(scene?.visual, 1200),
+      camera: cleanText(scene?.camera, 400),
+      narration: cleanText(scene?.narration, 1000),
+      sound: cleanText(scene?.sound, 400)
+    })
+  );
 
   return plan;
 }
 
-app.post("/api/video/plan", asyncHandler(async (req, res) => {
-  const prompt = cleanText(req.body?.prompt, 5000);
-  if (!prompt) {
-    return res.status(400).json({ ok: false, error: "Video prompt is required." });
-  }
+app.post(
+  "/api/video/plan",
+  aiRateLimit,
+  asyncHandler(async (req, res) => {
+    const prompt = cleanText(req.body?.prompt, 5000);
 
-  const plan = await buildVideoPlan({
-    prompt,
-    duration: req.body?.duration,
-    language: req.body?.language,
-    style: req.body?.style,
-    scenes: req.body?.scenes
-  });
+    if (!prompt) {
+      return res.status(400).json({
+        ok: false,
+        error: "Video prompt is required."
+      });
+    }
 
-  return res.json({ ok: true, plan });
-}));
+    const plan = await buildVideoPlan({
+      prompt,
+      duration: req.body?.duration,
+      language: req.body?.language,
+      style: req.body?.style,
+      scenes: req.body?.scenes
+    });
+
+    return res.json({
+      ok: true,
+      plan
+    });
+  })
+);
 
 /* -------------------- VIDEO RENDERING -------------------- */
 
 /*
-  This renderer creates a text-based storyboard/slideshow MP4 from the plan.
+  This renderer creates a text-based storyboard/slideshow MP4.
   It does NOT generate AI footage, character animation, or voice audio.
-  For true generative video, a separate video-generation provider is required.
 */
 
 function escapeFilterPath(filePath) {
@@ -545,7 +796,10 @@ function wrapText(value, maxChars = 58) {
   let line = "";
 
   for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
+    const candidate = line
+      ? `${line} ${word}`
+      : word;
+
     if (candidate.length > maxChars && line) {
       lines.push(line);
       line = word;
@@ -553,13 +807,26 @@ function wrapText(value, maxChars = 58) {
       line = candidate;
     }
   }
-  if (line) lines.push(line);
+
+  if (line) {
+    lines.push(line);
+  }
+
   return lines.slice(0, 8).join("\n");
 }
 
 function writeTextFile(id, name, value) {
-  const file = path.join(sceneDir, `${id}-${name}.txt`);
-  fs.writeFileSync(file, cleanText(value, 4000), "utf8");
+  const file = path.join(
+    sceneDir,
+    `${id}-${name}.txt`
+  );
+
+  fs.writeFileSync(
+    file,
+    cleanText(value, 4000),
+    "utf8"
+  );
+
   return escapeFilterPath(file);
 }
 
@@ -568,31 +835,56 @@ function renderVideo(plan) {
     const id = crypto.randomUUID();
     const outputFile = path.join(videoDir, `${id}.mp4`);
     const scenes = plan.scenes.slice(0, 12);
+
     const args = ["-y"];
     const filters = [];
     const labels = [];
+
     let totalDuration = 0;
 
     scenes.forEach((scene, index) => {
-      const duration = Math.max(2, Math.min(Number(scene.duration) || 4, 60));
+      const duration = Math.max(
+        2,
+        Math.min(Number(scene.duration) || 4, 60)
+      );
+
       totalDuration += duration;
 
       args.push(
-        "-f", "lavfi",
-        "-i", `color=c=0x16070d:s=1280x720:r=30:d=${duration}`
+        "-f",
+        "lavfi",
+        "-i",
+        `color=c=0x16070d:s=1280x720:r=30:d=${duration}`
       );
 
-      const titleFile = writeTextFile(id, `title-${index}`, plan.title);
-      const visualFile = writeTextFile(id, `visual-${index}`, wrapText(scene.visual));
-      const narrationFile = writeTextFile(id, `narration-${index}`, wrapText(scene.narration || " "));
-      const fontPath = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+      const titleFile = writeTextFile(
+        id,
+        `title-${index}`,
+        plan.title
+      );
+
+      const visualFile = writeTextFile(
+        id,
+        `visual-${index}`,
+        wrapText(scene.visual)
+      );
+
+      const narrationFile = writeTextFile(
+        id,
+        `narration-${index}`,
+        wrapText(scene.narration || " ")
+      );
+
+      const fontPath =
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+
       const fontOption = fs.existsSync(fontPath)
         ? `fontfile=${escapeFilterPath(fontPath)}:`
         : "";
 
+      // Input label is attached directly to the first filter.
       const filter = [
-        `[${index}:v]`,
-        `drawtext=${fontOption}textfile='${titleFile}':fontcolor=0xD6D6D6:fontsize=28:x=80:y=75:box=1:boxcolor=0x241018@0.8:boxborderw=14`,
+        `[${index}:v]drawtext=${fontOption}textfile='${titleFile}':fontcolor=0xD6D6D6:fontsize=28:x=80:y=75:box=1:boxcolor=0x241018@0.8:boxborderw=14`,
         `drawtext=${fontOption}textfile='${visualFile}':fontcolor=white:fontsize=38:line_spacing=18:x=80:y=220:box=1:boxcolor=0x241018@0.75:boxborderw=22`,
         `drawtext=${fontOption}text='SCENE ${index + 1} / ${scenes.length}':fontcolor=0xC0C0C0:fontsize=22:x=80:y=160`,
         `drawtext=${fontOption}textfile='${narrationFile}':fontcolor=0xDDDDDD:fontsize=22:line_spacing=10:x=80:y=570:box=1:boxcolor=0x241018@0.8:boxborderw=12`,
@@ -604,18 +896,28 @@ function renderVideo(plan) {
       labels.push(`[v${index}]`);
     });
 
-    filters.push(`${labels.join("")}concat=n=${scenes.length}:v=1:a=0[outv]`);
+    filters.push(
+      `${labels.join("")}concat=n=${scenes.length}:v=1:a=0[outv]`
+    );
 
     args.push(
-      "-filter_complex", filters.join(";"),
-      "-map", "[outv]",
+      "-filter_complex",
+      filters.join(";"),
+      "-map",
+      "[outv]",
       "-an",
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-r", "30",
-      "-pix_fmt", "yuv420p",
-      "-movflags", "+faststart",
-      "-t", String(Math.min(totalDuration, 180)),
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-r",
+      "30",
+      "-pix_fmt",
+      "yuv420p",
+      "-movflags",
+      "+faststart",
+      "-t",
+      String(Math.min(totalDuration, 180)),
       outputFile
     );
 
@@ -623,11 +925,17 @@ function renderVideo(plan) {
     let errorText = "";
 
     ffmpeg.stderr.on("data", (chunk) => {
-      errorText = (errorText + chunk.toString()).slice(-8000);
+      errorText = (
+        errorText + chunk.toString()
+      ).slice(-8000);
     });
 
     ffmpeg.on("error", (error) => {
-      reject(new Error(`FFmpeg could not start. Confirm FFmpeg is installed on the hosting service. ${error.message}`));
+      reject(
+        new Error(
+          `FFmpeg could not start. Confirm FFmpeg is installed on the hosting service. ${error.message}`
+        )
+      );
     });
 
     ffmpeg.on("close", (code) => {
@@ -639,90 +947,231 @@ function renderVideo(plan) {
           duration: totalDuration
         });
       } else {
-        reject(new Error(`FFmpeg rendering failed. ${errorText.slice(-2500)}`));
+        reject(
+          new Error(
+            `FFmpeg rendering failed. ${errorText.slice(-2500)}`
+          )
+        );
       }
     });
   });
 }
 
-app.post("/api/video/render", asyncHandler(async (req, res) => {
-  const plan = req.body?.plan;
-  if (!plan || !Array.isArray(plan.scenes) || plan.scenes.length < 1) {
-    return res.status(400).json({ ok: false, error: "A valid video plan is required." });
-  }
-  if (plan.scenes.length > 12) {
-    return res.status(400).json({ ok: false, error: "A maximum of 12 scenes is supported." });
-  }
+app.post(
+  "/api/video/render",
+  renderRateLimit,
+  asyncHandler(async (req, res) => {
+    const plan = req.body?.plan;
 
-  const result = await renderVideo({
-    title: cleanText(plan.title || "NOVAAA Video", 160),
-    scenes: plan.scenes.map((scene) => ({
-      duration: scene.duration,
-      visual: cleanText(scene.visual, 1200),
-      narration: cleanText(scene.narration, 1000)
-    }))
-  });
+    if (
+      !plan ||
+      !Array.isArray(plan.scenes) ||
+      plan.scenes.length < 1
+    ) {
+      return res.status(400).json({
+        ok: false,
+        error: "A valid video plan is required."
+      });
+    }
 
-  return res.json({
-    ok: true,
-    message: "NOVAAA rendered a storyboard video.",
-    video: result.url,
-    downloadUrl: result.url,
-    title: cleanText(plan.title || "NOVAAA Video", 160),
-    duration: result.duration,
-    note: "This is a scene-card slideshow, not AI-generated footage or voice audio."
-  });
-}));
+    if (plan.scenes.length > 12) {
+      return res.status(400).json({
+        ok: false,
+        error: "A maximum of 12 scenes is supported."
+      });
+    }
 
-app.post("/api/video/create", asyncHandler(async (req, res) => {
-  const prompt = cleanText(req.body?.prompt, 5000);
-  if (!prompt) {
-    return res.status(400).json({ ok: false, error: "Enter a video idea first." });
-  }
+    const result = await renderVideo({
+      title: cleanText(plan.title || "NOVAAA Video", 160),
+      scenes: plan.scenes.map((scene) => ({
+        duration: scene.duration,
+        visual: cleanText(scene.visual, 1200),
+        narration: cleanText(scene.narration, 1000)
+      }))
+    });
 
-  const plan = await buildVideoPlan({
-    prompt,
-    duration: req.body?.duration,
-    language: req.body?.language,
-    style: req.body?.style,
-    scenes: req.body?.scenes || 5
-  });
+    return res.json({
+      ok: true,
+      message: "NOVAAA rendered a storyboard video.",
+      video: result.url,
+      downloadUrl: result.url,
+      title: cleanText(plan.title || "NOVAAA Video", 160),
+      duration: result.duration,
+      note: "This is a scene-card slideshow, not AI-generated footage or voice audio."
+    });
+  })
+);
 
-  const result = await renderVideo(plan);
+app.post(
+  "/api/video/create",
+  renderRateLimit,
+  asyncHandler(async (req, res) => {
+    const prompt = cleanText(req.body?.prompt, 5000);
 
-  return res.json({
-    ok: true,
-    message: "NOVAAA rendered your scene-card video.",
-    plan,
-    video: result.url,
-    downloadUrl: result.url,
-    title: plan.title,
-    duration: result.duration,
-    note: "This is a scene-card slideshow. It does not contain AI-generated footage or voice audio."
-  });
-}));
+    if (!prompt) {
+      return res.status(400).json({
+        ok: false,
+        error: "Enter a video idea first."
+      });
+    }
 
+    const plan = await buildVideoPlan({
+      prompt,
+      duration: req.body?.duration,
+      language: req.body?.language,
+      style: req.body?.style,
+      scenes: req.body?.scenes || 5
+    });
 
-/* -------------------- NOVAAA BACKGROUND TASKS -------------------- */
-// Lightweight in-process task runner. Jobs survive page navigation, but not a server restart.
+    const result = await renderVideo(plan);
+
+    return res.json({
+      ok: true,
+      message: "NOVAAA rendered your scene-card video.",
+      plan,
+      video: result.url,
+      downloadUrl: result.url,
+      title: plan.title,
+      duration: result.duration,
+      note: "This is a scene-card slideshow. It does not contain AI-generated footage or voice audio."
+    });
+  })
+);
+
+/* -------------------- BACKGROUND TASKS -------------------- */
+
+// Lightweight in-process task runner.
+// Jobs do not survive a server restart.
+
 const agentJobs = new Map();
-function publicJob(job) { return { id: job.id, title: job.title, status: job.status, progress: job.progress, result: job.result || null, error: job.error || null, createdAt: job.createdAt, updatedAt: job.updatedAt }; }
-app.get("/api/agent/jobs", (req, res) => res.json({ ok: true, jobs: [...agentJobs.values()].sort((a,b) => b.createdAt.localeCompare(a.createdAt)).map(publicJob) }));
-app.post("/api/agent/jobs", asyncHandler(async (req, res) => {
-  const task = cleanText(req.body?.task, 8000);
-  if (!task) return res.status(400).json({ ok:false, error:"Describe the task first." });
-  const job = { id: crypto.randomUUID(), title: cleanText(req.body?.title || task, 100), task, status:"queued", progress:0, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() };
-  agentJobs.set(job.id, job);
-  res.status(202).json({ ok:true, job:publicJob(job), note:"This lightweight worker runs while this server process is awake; it is not a durable cloud worker." });
-  setImmediate(async () => {
-    try { job.status="running"; job.progress=15; job.updatedAt=new Date().toISOString();
-      const answer = await askGemini(`Complete this task carefully. If it is a creative task, provide a finished usable result.\n\nTASK: ${job.task}`, mainPrompt);
-      job.result=answer; job.progress=100; job.status="completed";
-    } catch (error) { job.error=error.message || "Task failed"; job.status="failed"; }
-    job.updatedAt=new Date().toISOString();
+
+function publicJob(job) {
+  return {
+    id: job.id,
+    title: job.title,
+    status: job.status,
+    progress: job.progress,
+    result: job.result || null,
+    error: job.error || null,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt
+  };
+}
+
+app.get("/api/agent/jobs", (req, res) => {
+  return res.json({
+    ok: true,
+    jobs: [...agentJobs.values()]
+      .sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt)
+      )
+      .map(publicJob)
   });
-}));
-app.post("/api/agent/jobs/:id/cancel", (req,res) => { const job=agentJobs.get(req.params.id); if(!job) return res.status(404).json({ok:false,error:"Task not found."}); if(job.status==="queued") job.status="cancelled"; else if(job.status==="running") return res.status(409).json({ok:false,error:"This task is already running and cannot be safely interrupted."}); job.updatedAt=new Date().toISOString(); return res.json({ok:true,job:publicJob(job)}); });
+});
+
+app.post(
+  "/api/agent/jobs",
+  aiRateLimit,
+  asyncHandler(async (req, res) => {
+    const task = cleanText(req.body?.task, 8000);
+
+    if (!task) {
+      return res.status(400).json({
+        ok: false,
+        error: "Describe the task first."
+      });
+    }
+
+    const job = {
+      id: crypto.randomUUID(),
+      title: cleanText(req.body?.title || task, 100),
+      task,
+      status: "queued",
+      progress: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    // Keep the in-memory job list bounded.
+    if (agentJobs.size >= 100) {
+      const removable = [...agentJobs.values()]
+        .filter((item) =>
+          ["completed", "failed", "cancelled"].includes(item.status)
+        )
+        .sort((a, b) =>
+          a.createdAt.localeCompare(b.createdAt)
+        );
+
+      while (agentJobs.size >= 100 && removable.length) {
+        agentJobs.delete(removable.shift().id);
+      }
+    }
+
+    if (agentJobs.size >= 100) {
+      return res.status(503).json({
+        ok: false,
+        error: "The background task queue is full. Try again later."
+      });
+    }
+
+    agentJobs.set(job.id, job);
+
+    res.status(202).json({
+      ok: true,
+      job: publicJob(job),
+      note: "This lightweight worker runs while this server process is awake; it is not a durable cloud worker."
+    });
+
+    setImmediate(async () => {
+      try {
+        job.status = "running";
+        job.progress = 15;
+        job.updatedAt = new Date().toISOString();
+
+        const answer = await askGemini(
+          `Complete this task carefully. If it is a creative task, provide a finished usable result.\n\nTASK: ${job.task}`,
+          mainPrompt
+        );
+
+        job.result = answer;
+        job.progress = 100;
+        job.status = "completed";
+      } catch (error) {
+        job.error = error.message || "Task failed";
+        job.status = "failed";
+      }
+
+      job.updatedAt = new Date().toISOString();
+    });
+  })
+);
+
+app.post("/api/agent/jobs/:id/cancel", (req, res) => {
+  const job = agentJobs.get(req.params.id);
+
+  if (!job) {
+    return res.status(404).json({
+      ok: false,
+      error: "Task not found."
+    });
+  }
+
+  if (job.status === "queued") {
+    job.status = "cancelled";
+  } else if (job.status === "running") {
+    return res.status(409).json({
+      ok: false,
+      error: "This task is already running and cannot be safely interrupted."
+    });
+  }
+
+  job.updatedAt = new Date().toISOString();
+
+  return res.json({
+    ok: true,
+    job: publicJob(job)
+  });
+});
 
 /* -------------------- FALLBACKS & ERRORS -------------------- */
 
@@ -735,23 +1184,56 @@ app.get("/api/*", (req, res) => {
 
 app.use((error, req, res, next) => {
   console.error("NOVAAA SERVER ERROR:", error);
-  if (res.headersSent) return next(error);
+
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  const safeMessage =
+    process.env.NODE_ENV === "production"
+      ? "An unexpected server error occurred. Check the Render logs for details."
+      : error?.message || "An unexpected server error occurred.";
+
   res.status(500).json({
     ok: false,
-    error: error?.message || "An unexpected server error occurred."
+    error: safeMessage
   });
 });
 
 app.get("*", (req, res, next) => {
-  if (req.path.startsWith("/generated/")) return next();
-  res.sendFile(path.join(dir, "../public/index.html"));
+  if (req.path.startsWith("/generated/")) {
+    return next();
+  }
+
+  res.sendFile(
+    path.join(dir, "../public/index.html")
+  );
 });
 
+/* -------------------- START SERVER -------------------- */
+
 app.listen(port, "0.0.0.0", () => {
+  if (!process.env.SESSION_SECRET) {
+    console.warn(
+      "WARNING: SESSION_SECRET is not set. Sessions will reset when the server restarts."
+    );
+  }
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    !process.env.DATA_DIR
+  ) {
+    console.warn(
+      "WARNING: DATA_DIR is not set. Project Memory may be lost on redeploy/restart unless the host disk is persistent."
+    );
+  }
+
   console.log("======================================");
-  console.log(" NOVAAA AI V6.0.0");
+  console.log(" NOVAAA AI V6.1.0");
   console.log(` Server running on port ${port}`);
-  console.log(` Providers: ${JSON.stringify(providerReady())}`);
+  console.log(
+    ` Providers: ${JSON.stringify(providerReady())}`
+  );
   console.log(` Features listed: ${features.length}`);
   console.log(" Project Memory: ENABLED (JSON file)");
   console.log(" Video Engine: FFmpeg scene-card renderer");
