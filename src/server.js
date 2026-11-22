@@ -6,6 +6,8 @@ import OpenAI from "openai";
 import session from "express-session";
 import crypto from "node:crypto";
 import path from "node:path";
+import fs from "node:fs";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 dotenv.config();
@@ -13,6 +15,14 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 const dir = path.dirname(fileURLToPath(import.meta.url));
+const root = path.join(dir, "..");
+
+const generatedDir = path.join(root, "generated");
+const videoDir = path.join(generatedDir, "videos");
+const sceneDir = path.join(generatedDir, "scenes");
+
+fs.mkdirSync(videoDir, { recursive: true });
+fs.mkdirSync(sceneDir, { recursive: true });
 
 const baseUrl = () =>
   (process.env.APP_BASE_URL || `http://localhost:${port}`).replace(/\/$/, "");
@@ -33,29 +43,32 @@ app.use(session({
 }));
 
 app.use(express.static(path.join(dir, "../public")));
+app.use("/generated", express.static(generatedDir));
 
 /* ================= SYSTEM ================= */
 
 const mainPrompt = `
 You are NOVAAA AI, an intelligent creative assistant.
 
-Your responsibilities:
-- Story writing
-- Horror and mystery writing
+You can help with:
+- Stories
+- Horror
+- Mystery
 - Screenplays
-- Character creation
+- Characters
 - World building
-- YouTube content
-- Instagram content
+- YouTube
+- Instagram
 - Video concepts
-- Animation planning
+- Animation
 - Creator tools
 - Content production
 - Creative brainstorming
+- Video directing
 
 Be creative, accurate and helpful.
 Follow the user's requested language.
-Never pretend to perform actions you cannot perform.
+Never pretend an action happened when it did not.
 `;
 
 const features = [
@@ -172,7 +185,10 @@ const features = [
   "Workspace Manager",
   "Memory Manager",
   "Safety Filter",
-  "System Health"
+  "System Health",
+  "NOVAAA Video Director",
+  "NOVAAA Scene Engine",
+  "NOVAAA Video Renderer"
 ];
 
 /* ================= PROVIDERS ================= */
@@ -183,19 +199,15 @@ const providerReady = () => ({
   openai: !!process.env.OPENAI_API_KEY
 });
 
-/* GEMINI */
-
 async function askGemini(message, systemPrompt) {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("Gemini API key is missing.");
   }
 
-  const client = new GoogleGenerativeAI(
-    process.env.GEMINI_API_KEY
-  );
+  const client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
   const model = client.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
+    model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
     systemInstruction: systemPrompt
   });
 
@@ -224,21 +236,20 @@ async function askGemini(message, systemPrompt) {
   throw lastError;
 }
 
-/* CLAUDE */
-
 async function askClaude(message, systemPrompt) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error("Claude API key is missing.");
+  }
+
   const client = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY
   });
 
   const response = await client.messages.create({
-    model: process.env.CLAUDE_MODEL ||
-      "claude-3-5-sonnet-20241022",
+    model: process.env.CLAUDE_MODEL || "claude-3-5-sonnet-20241022",
     max_tokens: 2000,
     system: systemPrompt,
-    messages: [
-      { role: "user", content: message }
-    ]
+    messages: [{ role: "user", content: message }]
   });
 
   return response.content
@@ -247,9 +258,11 @@ async function askClaude(message, systemPrompt) {
     .join("\n");
 }
 
-/* OPENAI */
-
 async function askOpenAI(message, systemPrompt) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OpenAI API key is missing.");
+  }
+
   const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
   });
@@ -264,8 +277,6 @@ async function askOpenAI(message, systemPrompt) {
 
   return response.choices[0]?.message?.content || "";
 }
-
-/* PROVIDER ROUTER */
 
 async function askProvider(provider, message, systemPrompt) {
   if (provider === "gemini") {
@@ -283,7 +294,7 @@ async function askProvider(provider, message, systemPrompt) {
   throw new Error("Unknown AI provider.");
 }
 
-/* ================= RESPONSE COMPATIBILITY ================= */
+/* ================= RESPONSE ================= */
 
 function sendAIResult(res, provider, answer, extra = {}) {
   return res.json({
@@ -305,7 +316,7 @@ app.get("/api/health", (_, res) => {
     ok: true,
     name: "NOVAAA AI",
     server: "online",
-    version: "3.1.0",
+    version: "4.0.0",
     timestamp: new Date().toISOString()
   });
 });
@@ -315,11 +326,15 @@ app.get("/api/status", (req, res) => {
     ok: true,
     name: "NOVAAA AI",
     server: "online",
-    version: "3.1.0",
+    version: "4.0.0",
     providers: providerReady(),
     connections: {
       youtube: !!req.session.youtubeConnected,
       instagram: false
+    },
+    videoEngine: {
+      enabled: true,
+      renderer: "FFmpeg"
     },
     featureCount: features.length
   });
@@ -374,9 +389,10 @@ app.post("/api/chat", async (req, res) => {
 
     const recent = Array.isArray(history)
       ? history.slice(-8).map(item => {
-          const role = item?.role === "assistant"
-            ? "Assistant"
-            : "User";
+          const role =
+            item?.role === "assistant"
+              ? "Assistant"
+              : "User";
 
           return `${role}: ${String(item?.content || "").slice(0, 3000)}`;
         }).join("\n")
@@ -460,326 +476,458 @@ Follow the user's requested language.
   }
 });
 
-/* ================= PROJECT MEMORY ================= */
+/* ============================================================
+   NOVAAA VIDEO ENGINE
+   ============================================================ */
 
-const memoryBySession = new Map();
+/* Create an AI video plan */
 
-function getMemories(req) {
-  if (!memoryBySession.has(req.sessionID)) {
-    memoryBySession.set(req.sessionID, []);
-  }
-
-  return memoryBySession.get(req.sessionID);
-}
-
-app.get("/api/memory", (req, res) => {
-  const memories = getMemories(req);
-
-  res.json({
-    ok: true,
-    memories,
-    projects: memories
-  });
-});
-
-app.post("/api/memory", (req, res) => {
-  const { title, content } = req.body || {};
-
-  if (!title || !content) {
-    return res.status(400).json({
-      ok: false,
-      error: "Title and content are required."
-    });
-  }
-
-  const memories = getMemories(req);
-
-  const memory = {
-    id: crypto.randomUUID(),
-    title: String(title).slice(0, 160),
-    content: String(content).slice(0, 10000),
-    createdAt: new Date().toISOString()
-  };
-
-  memories.unshift(memory);
-
-  res.json({
-    ok: true,
-    memory,
-    memories
-  });
-});
-
-app.delete("/api/memory/:id", (req, res) => {
-  const memories = getMemories(req);
-
-  const updated = memories.filter(
-    item => item.id !== req.params.id
-  );
-
-  memoryBySession.set(req.sessionID, updated);
-
-  res.json({
-    ok: true,
-    memories: updated
-  });
-});
-
-/* PROJECT COMPATIBILITY */
-
-app.get("/api/projects", (req, res) => {
-  res.json({
-    ok: true,
-    projects: getMemories(req)
-  });
-});
-
-app.post("/api/projects", (req, res) => {
-  const { name, content = "" } = req.body || {};
-
-  if (!name) {
-    return res.status(400).json({
-      ok: false,
-      error: "Project name is required."
-    });
-  }
-
-  const projects = getMemories(req);
-
-  const project = {
-    id: crypto.randomUUID(),
-    name: String(name).slice(0, 160),
-    title: String(name).slice(0, 160),
-    content: String(content).slice(0, 10000),
-    createdAt: new Date().toISOString()
-  };
-
-  projects.unshift(project);
-
-  res.json({
-    ok: true,
-    project,
-    projects
-  });
-});
-
-app.delete("/api/projects/:id", (req, res) => {
-  const updated = getMemories(req).filter(
-    item => item.id !== req.params.id
-  );
-
-  memoryBySession.set(req.sessionID, updated);
-
-  res.json({
-    ok: true,
-    projects: updated
-  });
-});
-
-/* ================= YOUTUBE ================= */
-
-const youtubeReady = () =>
-  !!(
-    process.env.GOOGLE_CLIENT_ID &&
-    process.env.GOOGLE_CLIENT_SECRET
-  );
-
-const youtubeRedirectUri = () =>
-  `${baseUrl()}/auth/youtube/callback`;
-
-app.get("/auth/youtube", async (req, res) => {
-  if (!youtubeReady()) {
-    return res.status(400).send(
-      "YouTube OAuth is not configured."
-    );
-  }
-
-  const state = crypto.randomBytes(24).toString("hex");
-
-  req.session.youtubeOAuthState = state;
-
+app.post("/api/video/plan", async (req, res) => {
   try {
-    await new Promise((resolve, reject) => {
-      req.session.save(error =>
-        error ? reject(error) : resolve()
-      );
-    });
+    const {
+      prompt,
+      duration = 30,
+      language = "English",
+      style = "cinematic",
+      scenes = 5
+    } = req.body || {};
 
-    const params = new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      redirect_uri: youtubeRedirectUri(),
-      response_type: "code",
-      scope:
-        "https://www.googleapis.com/auth/youtube.readonly " +
-        "https://www.googleapis.com/auth/youtube.upload",
-      access_type: "offline",
-      prompt: "consent",
-      state
-    });
-
-    res.redirect(
-      `https://accounts.google.com/o/oauth2/v2/auth?${params}`
-    );
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Could not start YouTube connection.");
-  }
-});
-
-app.get("/auth/youtube/callback", async (req, res) => {
-  try {
-    const { code, state, error } = req.query;
-
-    if (error) {
-      return res.redirect("/?youtube=cancelled");
-    }
-
-    if (
-      !state ||
-      state !== req.session.youtubeOAuthState
-    ) {
-      return res.status(403).send(
-        "Invalid OAuth state. Try connecting again."
-      );
-    }
-
-    delete req.session.youtubeOAuthState;
-
-    if (!code) {
-      return res.status(400).send("Missing authorisation code.");
-    }
-
-    const response = await fetch(
-      "https://oauth2.googleapis.com/token",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded"
-        },
-        body: new URLSearchParams({
-          code,
-          client_id: process.env.GOOGLE_CLIENT_ID,
-          client_secret: process.env.GOOGLE_CLIENT_SECRET,
-          redirect_uri: youtubeRedirectUri(),
-          grant_type: "authorization_code"
-        })
-      }
-    );
-
-    const tokens = await response.json();
-
-    if (!response.ok) {
-      console.error("GOOGLE TOKEN ERROR:", tokens);
-
-      return res.status(400).send(
-        "Google token exchange failed."
-      );
-    }
-
-    req.session.youtubeConnected = true;
-
-    await new Promise((resolve, reject) => {
-      req.session.save(error =>
-        error ? reject(error) : resolve()
-      );
-    });
-
-    res.redirect("/?youtube=connected");
-
-  } catch (error) {
-    console.error("YOUTUBE CALLBACK:", error);
-    res.status(500).send("YouTube connection failed.");
-  }
-});
-
-app.get("/api/youtube/status", (req, res) => {
-  res.json({
-    ok: true,
-    connected: !!req.session.youtubeConnected,
-    configured: youtubeReady()
-  });
-});
-
-app.post("/api/youtube/disconnect", (req, res) => {
-  delete req.session.youtubeConnected;
-
-  req.session.save(error => {
-    if (error) {
-      return res.status(500).json({
+    if (!prompt) {
+      return res.status(400).json({
         ok: false,
-        error: "Could not disconnect YouTube."
+        error: "Video prompt is required."
       });
+    }
+
+    const sceneCount = Math.max(
+      3,
+      Math.min(Number(scenes) || 5, 12)
+    );
+
+    const planningPrompt = `
+You are NOVAAA Video Director.
+
+Create a video production plan.
+
+User idea:
+${prompt}
+
+Language:
+${language}
+
+Visual style:
+${style}
+
+Target duration:
+${duration} seconds
+
+Create exactly ${sceneCount} scenes.
+
+Return ONLY valid JSON in this format:
+
+{
+  "title": "video title",
+  "description": "short description",
+  "scenes": [
+    {
+      "number": 1,
+      "duration": 5,
+      "visual": "visual description",
+      "camera": "camera direction",
+      "narration": "narration",
+      "sound": "sound design"
+    }
+  ]
+}
+`;
+
+    const raw = await askGemini(
+      planningPrompt,
+      mainPrompt
+    );
+
+    let plan;
+
+    try {
+      const cleaned = raw
+        .replace(/```json/gi, "")
+        .replace(/```/g, "")
+        .trim();
+
+      plan = JSON.parse(cleaned);
+    } catch {
+      plan = {
+        title: "NOVAAA Video",
+        description: prompt,
+        scenes: Array.from(
+          { length: sceneCount },
+          (_, index) => ({
+            number: index + 1,
+            duration: Math.max(
+              2,
+              Math.round(Number(duration) / sceneCount)
+            ),
+            visual: `${prompt} — scene ${index + 1}`,
+            camera: "cinematic camera movement",
+            narration: "",
+            sound: "cinematic ambience"
+          })
+        )
+      };
     }
 
     res.json({
       ok: true,
-      connected: false
+      plan
     });
-  });
-});
 
-/* ================= INSTAGRAM ================= */
+  } catch (error) {
+    console.error("VIDEO PLAN ERROR:", error);
 
-app.get("/api/instagram/status", (_, res) => {
-  const configured = !!(
-    process.env.INSTAGRAM_APP_ID &&
-    process.env.INSTAGRAM_APP_SECRET
-  );
-
-  res.json({
-    ok: true,
-    configured,
-    connected: false,
-    message: configured
-      ? "Credentials detected. OAuth still needs implementation."
-      : "Instagram credentials are not configured."
-  });
-});
-
-app.get("/auth/instagram", (_, res) => {
-  res.status(501).send(
-    "Instagram OAuth has not been implemented yet."
-  );
-});
-
-/* ================= SOCIAL STATUS ================= */
-
-app.get("/api/social/status", (req, res) => {
-  res.json({
-    ok: true,
-    youtube: !!req.session.youtubeConnected,
-    youtubeConnected: !!req.session.youtubeConnected,
-    instagram: false,
-    instagramConnected: false
-  });
-});
-
-/* ================= FALLBACK ================= */
-
-app.get("*", (req, res) => {
-  if (req.path.startsWith("/api/")) {
-    return res.status(404).json({
+    res.status(500).json({
       ok: false,
-      error: "API endpoint not found."
+      error: error.message || "Could not create video plan."
     });
   }
-
-  res.sendFile(
-    path.join(dir, "../public/index.html")
-  );
 });
 
-/* ================= START ================= */
+/* Create SVG scene cards */
 
-app.listen(port, () => {
-  console.log("--------------------------------");
-  console.log("NOVAAA AI V3.1.0");
-  console.log(`Server running on port ${port}`);
-  console.log(`Features listed: ${features.length}`);
-  console.log(
-    "Gemini model:",
-    process.env.GEMINI_MODEL || "gemini-3.8-flash"
-  );
-  console.log("--------------------------------");
+function escapeXml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function wrapText(text, maxChars = 55) {
+  const words = String(text || "").split(/\s+/);
+  const lines = [];
+  let current = "";
+
+  for (const word of words) {
+    if ((current + " " + word).trim().length > maxChars) {
+      if (current) lines.push(current);
+      current = word;
+    } else {
+      current = `${current} ${word}`.trim();
+    }
+  }
+
+  if (current) lines.push(current);
+
+  return lines.slice(0, 8);
+}
+
+function createSceneSVG(scene, totalScenes, title) {
+  const visualLines = wrapText(scene.visual || "");
+  const narrationLines = wrapText(scene.narration || "");
+
+  const visualText = visualLines
+    .map(
+      (line, i) =>
+        `<text x="80" y="${300 + i * 42}" font-size="30" fill="#eeeeee">${escapeXml(line)}</text>`
+    )
+    .join("");
+
+  const narrationText = narrationLines
+    .map(
+      (line, i) =>
+        `<text x="80" y="${660 + i * 34}" font-size="22" fill="#dddddd">${escapeXml(line)}</text>`
+    )
+    .join("");
+
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720">
+  <rect width="1280" height="720" fill="#16070d"/>
+  <rect x="35" y="35" width="1210" height="650"
+        rx="28" fill="#241018" stroke="#b9b9b9" stroke-width="3"/>
+
+  <text x="80" y="105"
+        font-family="Arial"
+        font-size="28"
+        fill="#c0c0c0">NOVAAA AI • VIDEO STUDIO</text>
+
+  <text x="80" y="165"
+        font-family="Arial"
+        font-size="44"
+        font-weight="bold"
+        fill="#ffffff">${escapeXml(title)}</text>
+
+  <text x="80" y="220"
+        font-family="Arial"
+        font-size="24"
+        fill="#bdbdbd">SCENE ${scene.number} / ${totalScenes}</text>
+
+  <line x1="80" y1="245" x2="1200" y2="245"
+        stroke="#777777" stroke-width="2"/>
+
+  ${visualText}
+
+  <text x="80" y="620"
+        font-family="Arial"
+        font-size="20"
+        fill="#aaaaaa">NARRATION</text>
+
+  ${narrationText}
+
+  <text x="1100" y="650"
+        font-family="Arial"
+        font-size="18"
+        fill="#999999">${escapeXml(scene.duration)}s</text>
+</svg>`;
+}
+
+/* Render actual MP4 */
+
+function renderVideo(sceneFiles, outputFile, fps = 30) {
+  return new Promise((resolve, reject) => {
+    const listFile = path.join(
+      videoDir,
+      `${crypto.randomUUID()}.txt`
+    );
+
+    const listContent = sceneFiles
+      .map(file => `file '${file.replace(/'/g, "'\\''")}'`)
+      .join("\n");
+
+    fs.writeFileSync(listFile, listContent);
+
+    const args = [
+      "-y",
+      "-f", "concat",
+      "-safe", "0",
+      "-i", listFile,
+      "-vf",
+      "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+      "-r", String(fps),
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+      outputFile
+    ];
+
+    const ffmpeg = spawn("ffmpeg", args);
+
+    let errorText = "";
+
+    ffmpeg.stderr.on("data", data => {
+      errorText += data.toString();
+    });
+
+    ffmpeg.on("error", error => {
+      try {
+        fs.unlinkSync(listFile);
+      } catch {}
+
+      reject(
+        new Error(
+          `FFmpeg could not start. Make sure FFmpeg is installed. ${error.message}`
+        )
+      );
+    });
+
+    ffmpeg.on("close", code => {
+      try {
+        fs.unlinkSync(listFile);
+      } catch {}
+
+      if (code === 0) {
+        resolve(outputFile);
+      } else {
+        reject(
+          new Error(
+            `FFmpeg failed: ${errorText.slice(-3000)}`
+          )
+        );
+      }
+    });
+  });
+}
+
+app.post("/api/video/render", async (req, res) => {
+  try {
+    const { plan } = req.body || {};
+
+    if (!plan || !Array.isArray(plan.scenes)) {
+      return res.status(400).json({
+        ok: false,
+        error: "A valid video plan is required."
+      });
+    }
+
+    const id = crypto.randomUUID();
+    const title = plan.title || "NOVAAA Video";
+
+    const sceneFiles = [];
+
+    for (let i = 0; i < plan.scenes.length; i++) {
+      const scene = plan.scenes[i];
+
+      const svg = createSceneSVG(
+        scene,
+        plan.scenes.length,
+        title
+      );
+
+      const file = path.join(
+        sceneDir,
+        `${id}-${i + 1}.svg`
+      );
+
+      fs.writeFileSync(file, svg);
+      sceneFiles.push(file);
+    }
+
+    const output = path.join(
+      videoDir,
+      `${id}.mp4`
+    );
+
+    await renderVideo(sceneFiles, output);
+
+    res.json({
+      ok: true,
+      message: "NOVAAA created the video.",
+      video: `/generated/videos/${id}.mp4`,
+      downloadUrl: `/generated/videos/${id}.mp4`,
+      title
+    });
+
+  } catch (error) {
+    console.error("VIDEO RENDER ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      error: error.message || "Video rendering failed."
+    });
+  }
 });
+
+/* One-click video */
+
+app.post("/api/video/create", async (req, res) => {
+  try {
+    const {
+      prompt,
+      duration = 30,
+      language = "English",
+      style = "cinematic"
+    } = req.body || {};
+
+    if (!prompt) {
+      return res.status(400).json({
+        ok: false,
+        error: "Enter a video idea."
+      });
+    }
+
+    const sceneCount = Math.max(
+      3,
+      Math.min(8, Math.ceil(Number(duration) / 6))
+    );
+
+    const planningPrompt = `
+You are NOVAAA AI Video Director.
+
+Create a ${duration}-second ${style} video.
+
+Idea:
+${prompt}
+
+Language:
+${language}
+
+Create exactly ${sceneCount} scenes.
+
+Return ONLY JSON:
+
+{
+  "title": "title",
+  "scenes": [
+    {
+      "number": 1,
+      "duration": 5,
+      "visual": "visual description",
+      "camera": "camera movement",
+      "narration": "short narration",
+      "sound": "sound"
+    }
+  ]
+}
+`;
+
+    const raw = await askGemini(
+      planningPrompt,
+      mainPrompt
+    );
+
+    let plan;
+
+    try {
+      plan = JSON.parse(
+        raw
+          .replace(/```json/gi, "")
+          .replace(/```/g, "")
+          .trim()
+      );
+    } catch {
+      plan = {
+        title: "NOVAAA AI Video",
+        scenes: Array.from(
+          { length: sceneCount },
+          (_, i) => ({
+            number: i + 1,
+            duration: Math.round(
+              Number(duration) / sceneCount
+            ),
+            visual: `${prompt} — cinematic scene ${i + 1}`,
+            camera: "slow cinematic movement",
+            narration: "",
+            sound: "cinematic ambience"
+          })
+        )
+      };
+    }
+
+    const id = crypto.randomUUID();
+    const sceneFiles = [];
+
+    for (let i = 0; i < plan.scenes.length; i++) {
+      const file = path.join(
+        sceneDir,
+        `${id}-${i + 1}.svg`
+      );
+
+      fs.writeFileSync(
+        file,
+        createSceneSVG(
+          plan.scenes[i],
+          plan.scenes.length,
+          plan.title || "NOVAAA AI Video"
+        )
+      );
+
+      sceneFiles.push(file);
+    }
+
+    const output = path.join(
+      videoDir,
+      `${id}.mp4`
+    );
+
+    await renderVideo(sceneFiles, output);
+
+    res.json({
+      ok: true,
+      title: plan.title,
+      plan,
+      video: `/generated/videos/${id}.mp4`,
+      downloadUrl: `/generated/videos/${id}.mp4`
+    });
+
+  } catch (error) {
+    console.error("ONE CLICK VIDEO E
