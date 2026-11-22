@@ -15,31 +15,26 @@ const port = process.env.PORT || 3000;
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
 app.set("trust proxy", 1);
-
 app.use(express.json({ limit: "2mb" }));
 
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "change-this-session-secret",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: "auto",
-      maxAge: 24 * 60 * 60 * 1000
-    }
-  })
-);
+app.use(session({
+  secret: process.env.SESSION_SECRET || "change-this-session-secret",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: "auto",
+    maxAge: 24 * 60 * 60 * 1000
+  }
+}));
 
 app.use(express.static(path.join(dir, "../public")));
 
 const baseUrl = () =>
   (process.env.APP_BASE_URL || `http://localhost:${port}`).replace(/\/$/, "");
 
-/* =====================================================
-   AI PROVIDERS
-===================================================== */
+/* ================= AI PROVIDERS ================= */
 
 const providerReady = () => ({
   claude: !!process.env.ANTHROPIC_API_KEY,
@@ -66,14 +61,17 @@ async function askClaude(message, systemPrompt) {
 }
 
 async function askGemini(message, systemPrompt) {
-  const client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const client = new GoogleGenerativeAI(
+    process.env.GEMINI_API_KEY
+  );
 
   const model = client.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+    model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
     systemInstruction: systemPrompt
   });
 
   const result = await model.generateContent(message);
+
   return result.response.text();
 }
 
@@ -93,9 +91,7 @@ async function askOpenAI(message, systemPrompt) {
   return response.choices[0]?.message?.content || "";
 }
 
-/* =====================================================
-   FEATURE REGISTRY
-===================================================== */
+/* ================= FEATURE REGISTRY ================= */
 
 const features = [
   "AI Chat",
@@ -214,9 +210,7 @@ const features = [
   "System Health"
 ];
 
-/* =====================================================
-   SYSTEM PROMPTS
-===================================================== */
+/* ================= SYSTEM PROMPT ================= */
 
 const mainPrompt = `
 You are NOVAAA AI, an intelligent creative assistant.
@@ -235,16 +229,14 @@ Follow the user's requested language and format.
 Do not claim to have performed actions that you have not performed.
 `;
 
-/* =====================================================
-   HEALTH AND STATUS
-===================================================== */
+/* ================= HEALTH AND STATUS ================= */
 
-app.get("/api/health", (req, res) => {
+app.get("/api/health", (_, res) => {
   res.json({
     ok: true,
     name: "NOVAAA AI",
     server: "online",
-    version: "3.0.0",
+    version: "3.0.1",
     timestamp: new Date().toISOString()
   });
 });
@@ -253,7 +245,7 @@ app.get("/api/status", (req, res) => {
   res.json({
     ok: true,
     name: "NOVAAA AI",
-    version: "3.0.0",
+    version: "3.0.1",
     server: "online",
     providers: providerReady(),
     connections: {
@@ -279,9 +271,7 @@ app.get("/api/features", (_, res) => {
   });
 });
 
-/* =====================================================
-   AI CHAT
-===================================================== */
+/* ================= AI CHAT ================= */
 
 app.post("/api/chat", async (req, res) => {
   try {
@@ -308,6 +298,13 @@ app.post("/api/chat", async (req, res) => {
 
     const available = providerReady();
 
+    if (!["claude", "gemini", "openai"].includes(provider)) {
+      return res.status(400).json({
+        ok: false,
+        error: "Unknown AI provider."
+      });
+    }
+
     if (!available[provider]) {
       return res.status(400).json({
         ok: false,
@@ -327,13 +324,8 @@ app.post("/api/chat", async (req, res) => {
       answer = await askClaude(message, instruction);
     } else if (provider === "gemini") {
       answer = await askGemini(message, instruction);
-    } else if (provider === "openai") {
-      answer = await askOpenAI(message, instruction);
     } else {
-      return res.status(400).json({
-        ok: false,
-        error: "Unknown AI provider."
-      });
+      answer = await askOpenAI(message, instruction);
     }
 
     res.json({
@@ -352,9 +344,7 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-/* =====================================================
-   CREATIVE COMMAND ROUTER
-===================================================== */
+/* ================= CREATIVE COMMAND ROUTER ================= */
 
 app.post("/api/command", async (req, res) => {
   try {
@@ -371,9 +361,14 @@ app.post("/api/command", async (req, res) => {
       });
     }
 
-    const available = providerReady();
+    if (!["claude", "gemini", "openai"].includes(provider)) {
+      return res.status(400).json({
+        ok: false,
+        error: "Unknown provider."
+      });
+    }
 
-    if (!available[provider]) {
+    if (!providerReady()[provider]) {
       return res.status(400).json({
         ok: false,
         error: `${provider} is not configured.`
@@ -399,13 +394,8 @@ Do not include unnecessary introductions.
       answer = await askClaude(prompt, mainPrompt);
     } else if (provider === "gemini") {
       answer = await askGemini(prompt, mainPrompt);
-    } else if (provider === "openai") {
-      answer = await askOpenAI(prompt, mainPrompt);
     } else {
-      return res.status(400).json({
-        ok: false,
-        error: "Unknown provider."
-      });
+      answer = await askOpenAI(prompt, mainPrompt);
     }
 
     res.json({
@@ -425,9 +415,7 @@ Do not include unnecessary introductions.
   }
 });
 
-/* =====================================================
-   YOUTUBE OAUTH
-===================================================== */
+/* ================= YOUTUBE OAUTH ================= */
 
 const youtubeReady = () =>
   !!(
@@ -485,9 +473,7 @@ app.get("/auth/youtube/callback", async (req, res) => {
     const { code, state, error } = req.query;
 
     if (error) {
-      return res.redirect(
-        "/?youtube=cancelled"
-      );
+      return res.redirect("/?youtube=cancelled");
     }
 
     if (
@@ -503,7 +489,9 @@ app.get("/auth/youtube/callback", async (req, res) => {
     delete req.session.youtubeOAuthState;
 
     if (!code) {
-      return res.status(400).send("Missing Google authorisation code.");
+      return res.status(400).send(
+        "Missing Google authorisation code."
+      );
     }
 
     const response = await fetch(
@@ -535,9 +523,8 @@ app.get("/auth/youtube/callback", async (req, res) => {
 
     req.session.youtubeConnected = true;
 
-    // Tokens are not exposed to the browser.
-    // Persistent encrypted token storage should be added
-    // before implementing YouTube upload features.
+    // Token persistence is not implemented yet.
+    // YouTube publishing is not enabled by this connection alone.
 
     await new Promise((resolve, reject) => {
       req.session.save(error => {
@@ -580,9 +567,7 @@ app.post("/api/youtube/disconnect", (req, res) => {
   });
 });
 
-/* =====================================================
-   INSTAGRAM STATUS
-===================================================== */
+/* ================= INSTAGRAM STATUS ================= */
 
 app.get("/api/instagram/status", (_, res) => {
   const configured = !!(
@@ -600,9 +585,7 @@ app.get("/api/instagram/status", (_, res) => {
   });
 });
 
-/* =====================================================
-   PROJECT MEMORY API
-===================================================== */
+/* ================= PROJECT MEMORY ================= */
 
 const projectMemory = new Map();
 
@@ -658,9 +641,7 @@ app.delete("/api/projects/:id", (req, res) => {
   });
 });
 
-/* =====================================================
-   FALLBACK
-===================================================== */
+/* ================= FALLBACK ================= */
 
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api/")) {
@@ -673,13 +654,11 @@ app.get("*", (req, res, next) => {
   res.sendFile(path.join(dir, "../public/index.html"));
 });
 
-/* =====================================================
-   START SERVER
-===================================================== */
+/* ================= START SERVER ================= */
 
 app.listen(port, () => {
   console.log("--------------------------------");
-  console.log("NOVAAA AI V3.0.0");
+  console.log("NOVAAA AI V3.0.1");
   console.log(`Server running on port ${port}`);
   console.log(`Features registered: ${features.length}`);
   console.log("--------------------------------");
