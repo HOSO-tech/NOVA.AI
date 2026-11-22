@@ -14,6 +14,7 @@ dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3000;
+
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(dir, "..");
 
@@ -28,19 +29,24 @@ const baseUrl = () =>
   (process.env.APP_BASE_URL || `http://localhost:${port}`).replace(/\/$/, "");
 
 app.set("trust proxy", 1);
+
 app.use(express.json({ limit: "2mb" }));
 
-app.use(session({
-  secret: process.env.SESSION_SECRET || "replace-this-with-a-long-random-secret",
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: "auto",
-    maxAge: 86400000
-  }
-}));
+app.use(
+  session({
+    secret:
+      process.env.SESSION_SECRET ||
+      "replace-this-with-a-long-random-secret",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: "auto",
+      maxAge: 86400000
+    }
+  })
+);
 
 app.use(express.static(path.join(dir, "../public")));
 app.use("/generated", express.static(generatedDir));
@@ -204,10 +210,14 @@ async function askGemini(message, systemPrompt) {
     throw new Error("Gemini API key is missing.");
   }
 
-  const client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const client = new GoogleGenerativeAI(
+    process.env.GEMINI_API_KEY
+  );
 
   const model = client.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
+    model:
+      process.env.GEMINI_MODEL ||
+      "gemini-3.5-flash-lite",
     systemInstruction: systemPrompt
   });
 
@@ -225,10 +235,12 @@ async function askGemini(message, systemPrompt) {
           String(error.message)
         );
 
-      if (!temporary || attempt === 2) break;
+      if (!temporary || attempt === 2) {
+        break;
+      }
 
-      await new Promise(resolve =>
-        setTimeout(resolve, 1000 * (2 ** attempt))
+      await new Promise((resolve) =>
+        setTimeout(resolve, 1000 * 2 ** attempt)
       );
     }
   }
@@ -246,15 +258,22 @@ async function askClaude(message, systemPrompt) {
   });
 
   const response = await client.messages.create({
-    model: process.env.CLAUDE_MODEL || "claude-3-5-sonnet-20241022",
+    model:
+      process.env.CLAUDE_MODEL ||
+      "claude-3-5-sonnet-20241022",
     max_tokens: 2000,
     system: systemPrompt,
-    messages: [{ role: "user", content: message }]
+    messages: [
+      {
+        role: "user",
+        content: message
+      }
+    ]
   });
 
   return response.content
-    .filter(item => item.type === "text")
-    .map(item => item.text)
+    .filter((item) => item.type === "text")
+    .map((item) => item.text)
     .join("\n");
 }
 
@@ -267,18 +286,34 @@ async function askOpenAI(message, systemPrompt) {
     apiKey: process.env.OPENAI_API_KEY
   });
 
-  const response = await client.chat.completions.create({
-    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: message }
-    ]
-  });
+  const response =
+    await client.chat.completions.create({
+      model:
+        process.env.OPENAI_MODEL ||
+        "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: message
+        }
+      ]
+    });
 
-  return response.choices[0]?.message?.content || "";
+  return (
+    response.choices[0]?.message?.content ||
+    ""
+  );
 }
 
-async function askProvider(provider, message, systemPrompt) {
+async function askProvider(
+  provider,
+  message,
+  systemPrompt
+) {
   if (provider === "gemini") {
     return askGemini(message, systemPrompt);
   }
@@ -296,7 +331,12 @@ async function askProvider(provider, message, systemPrompt) {
 
 /* ================= RESPONSE ================= */
 
-function sendAIResult(res, provider, answer, extra = {}) {
+function sendAIResult(
+  res,
+  provider,
+  answer,
+  extra = {}
+) {
   return res.json({
     ok: true,
     provider,
@@ -367,7 +407,10 @@ app.post("/api/chat", async (req, res) => {
       history = []
     } = req.body || {};
 
-    if (!message || typeof message !== "string") {
+    if (
+      !message ||
+      typeof message !== "string"
+    ) {
       return res.status(400).json({
         ok: false,
         error: "Please enter a message."
@@ -383,19 +426,28 @@ app.post("/api/chat", async (req, res) => {
 
     const instruction = [
       mainPrompt,
-      feature ? `Current tool: ${feature}` : "",
+      feature
+        ? `Current tool: ${feature}`
+        : "",
       systemPrompt
-    ].filter(Boolean).join("\n\n");
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     const recent = Array.isArray(history)
-      ? history.slice(-8).map(item => {
-          const role =
-            item?.role === "assistant"
-              ? "Assistant"
-              : "User";
+      ? history
+          .slice(-8)
+          .map((item) => {
+            const role =
+              item?.role === "assistant"
+                ? "Assistant"
+                : "User";
 
-          return `${role}: ${String(item?.content || "").slice(0, 3000)}`;
-        }).join("\n")
+            return `${role}: ${String(
+              item?.content || ""
+            ).slice(0, 3000)}`;
+          })
+          .join("\n")
       : "";
 
     const prompt = recent
@@ -408,14 +460,22 @@ app.post("/api/chat", async (req, res) => {
       instruction
     );
 
-    sendAIResult(res, provider, answer);
-
+    sendAIResult(
+      res,
+      provider,
+      answer
+    );
   } catch (error) {
-    console.error("AI CHAT ERROR:", error);
+    console.error(
+      "AI CHAT ERROR:",
+      error
+    );
 
     res.status(500).json({
       ok: false,
-      error: error.message || "AI request failed."
+      error:
+        error.message ||
+        "AI request failed."
     });
   }
 });
@@ -432,13 +492,19 @@ app.post("/api/command", async (req, res) => {
       feature = ""
     } = req.body || {};
 
-    const task = String(command || prompt || "").trim();
-    const userInput = String(input || "").trim();
+    const task = String(
+      command || prompt || ""
+    ).trim();
+
+    const userInput = String(
+      input || ""
+    ).trim();
 
     if (!task && !userInput) {
       return res.status(400).json({
         ok: false,
-        error: "Enter a command or prompt."
+        error:
+          "Enter a command or prompt."
       });
     }
 
@@ -462,16 +528,25 @@ Follow the user's requested language.
       mainPrompt
     );
 
-    sendAIResult(res, provider, answer, {
-      command: task
-    });
-
+    sendAIResult(
+      res,
+      provider,
+      answer,
+      {
+        command: task
+      }
+    );
   } catch (error) {
-    console.error("COMMAND ERROR:", error);
+    console.error(
+      "COMMAND ERROR:",
+      error
+    );
 
     res.status(500).json({
       ok: false,
-      error: error.message || "Command failed."
+      error:
+        error.message ||
+        "Command failed."
     });
   }
 });
@@ -480,7 +555,7 @@ Follow the user's requested language.
    NOVAAA VIDEO ENGINE
    ============================================================ */
 
-/* Create an AI video plan */
+/* ================= VIDEO PLAN ================= */
 
 app.post("/api/video/plan", async (req, res) => {
   try {
@@ -495,13 +570,17 @@ app.post("/api/video/plan", async (req, res) => {
     if (!prompt) {
       return res.status(400).json({
         ok: false,
-        error: "Video prompt is required."
+        error:
+          "Video prompt is required."
       });
     }
 
     const sceneCount = Math.max(
       3,
-      Math.min(Number(scenes) || 5, 12)
+      Math.min(
+        Number(scenes) || 5,
+        12
+      )
     );
 
     const planningPrompt = `
@@ -560,17 +639,27 @@ Return ONLY valid JSON in this format:
         title: "NOVAAA Video",
         description: prompt,
         scenes: Array.from(
-          { length: sceneCount },
+          {
+            length: sceneCount
+          },
           (_, index) => ({
             number: index + 1,
             duration: Math.max(
               2,
-              Math.round(Number(duration) / sceneCount)
+              Math.round(
+                Number(duration) /
+                  sceneCount
+              )
             ),
-            visual: `${prompt} — scene ${index + 1}`,
-            camera: "cinematic camera movement",
+            visual:
+              `${prompt} — scene ${
+                index + 1
+              }`,
+            camera:
+              "cinematic camera movement",
             narration: "",
-            sound: "cinematic ambience"
+            sound:
+              "cinematic ambience"
           })
         )
       };
@@ -580,18 +669,22 @@ Return ONLY valid JSON in this format:
       ok: true,
       plan
     });
-
   } catch (error) {
-    console.error("VIDEO PLAN ERROR:", error);
+    console.error(
+      "VIDEO PLAN ERROR:",
+      error
+    );
 
     res.status(500).json({
       ok: false,
-      error: error.message || "Could not create video plan."
+      error:
+        error.message ||
+        "Could not create video plan."
     });
   }
 });
 
-/* Create SVG scene cards */
+/* ================= SVG SCENE CARDS ================= */
 
 function escapeXml(value) {
   return String(value || "")
@@ -602,235 +695,398 @@ function escapeXml(value) {
     .replace(/'/g, "&apos;");
 }
 
-function wrapText(text, maxChars = 55) {
-  const words = String(text || "").split(/\s+/);
+function wrapText(
+  text,
+  maxChars = 55
+) {
+  const words = String(text || "")
+    .split(/\s+/);
+
   const lines = [];
   let current = "";
 
   for (const word of words) {
-    if ((current + " " + word).trim().length > maxChars) {
-      if (current) lines.push(current);
+    if (
+      (
+        current +
+        " " +
+        word
+      ).trim().length > maxChars
+    ) {
+      if (current) {
+        lines.push(current);
+      }
+
       current = word;
     } else {
-      current = `${current} ${word}`.trim();
+      current =
+        `${current} ${word}`.trim();
     }
   }
 
-  if (current) lines.push(current);
+  if (current) {
+    lines.push(current);
+  }
 
   return lines.slice(0, 8);
 }
 
-function createSceneSVG(scene, totalScenes, title) {
-  const visualLines = wrapText(scene.visual || "");
-  const narrationLines = wrapText(scene.narration || "");
+function createSceneSVG(
+  scene,
+  totalScenes,
+  title
+) {
+  const visualLines =
+    wrapText(
+      scene.visual || ""
+    );
 
-  const visualText = visualLines
-    .map(
-      (line, i) =>
-        `<text x="80" y="${300 + i * 42}" font-size="30" fill="#eeeeee">${escapeXml(line)}</text>`
-    )
-    .join("");
+  const narrationLines =
+    wrapText(
+      scene.narration || ""
+    );
 
-  const narrationText = narrationLines
-    .map(
-      (line, i) =>
-        `<text x="80" y="${660 + i * 34}" font-size="22" fill="#dddddd">${escapeXml(line)}</text>`
-    )
-    .join("");
+  const visualText =
+    visualLines
+      .map(
+        (line, i) =>
+          `<text x="80" y="${
+            300 + i * 42
+          }" font-size="30" fill="#eeeeee">${escapeXml(
+            line
+          )}</text>`
+      )
+      .join("");
+
+  const narrationText =
+    narrationLines
+      .map(
+        (line, i) =>
+          `<text x="80" y="${
+            660 + i * 34
+          }" font-size="22" fill="#dddddd">${escapeXml(
+            line
+          )}</text>`
+      )
+      .join("");
 
   return `
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720">
-  <rect width="1280" height="720" fill="#16070d"/>
-  <rect x="35" y="35" width="1210" height="650"
-        rx="28" fill="#241018" stroke="#b9b9b9" stroke-width="3"/>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1280"
+     height="720">
 
-  <text x="80" y="105"
+  <rect width="1280"
+        height="720"
+        fill="#16070d"/>
+
+  <rect x="35"
+        y="35"
+        width="1210"
+        height="650"
+        rx="28"
+        fill="#241018"
+        stroke="#b9b9b9"
+        stroke-width="3"/>
+
+  <text x="80"
+        y="105"
         font-family="Arial"
         font-size="28"
-        fill="#c0c0c0">NOVAAA AI • VIDEO STUDIO</text>
+        fill="#c0c0c0">
+    NOVAAA AI • VIDEO STUDIO
+  </text>
 
-  <text x="80" y="165"
+  <text x="80"
+        y="165"
         font-family="Arial"
         font-size="44"
         font-weight="bold"
-        fill="#ffffff">${escapeXml(title)}</text>
+        fill="#ffffff">
+    ${escapeXml(title)}
+  </text>
 
-  <text x="80" y="220"
+  <text x="80"
+        y="220"
         font-family="Arial"
         font-size="24"
-        fill="#bdbdbd">SCENE ${scene.number} / ${totalScenes}</text>
+        fill="#bdbdbd">
+    SCENE ${scene.number} / ${totalScenes}
+  </text>
 
-  <line x1="80" y1="245" x2="1200" y2="245"
-        stroke="#777777" stroke-width="2"/>
+  <line x1="80"
+        y1="245"
+        x2="1200"
+        y2="245"
+        stroke="#777777"
+        stroke-width="2"/>
 
   ${visualText}
 
-  <text x="80" y="620"
+  <text x="80"
+        y="620"
         font-family="Arial"
         font-size="20"
-        fill="#aaaaaa">NARRATION</text>
+        fill="#aaaaaa">
+    NARRATION
+  </text>
 
   ${narrationText}
 
-  <text x="1100" y="650"
+  <text x="1100"
+        y="650"
         font-family="Arial"
         font-size="18"
-        fill="#999999">${escapeXml(scene.duration)}s</text>
+        fill="#999999">
+    ${escapeXml(scene.duration)}s
+  </text>
+
 </svg>`;
 }
 
-/* Render actual MP4 */
+/* ================= VIDEO RENDERER ================= */
 
-function renderVideo(sceneFiles, outputFile, fps = 30) {
-  return new Promise((resolve, reject) => {
-    const listFile = path.join(
-      videoDir,
-      `${crypto.randomUUID()}.txt`
-    );
-
-    const listContent = sceneFiles
-      .map(file => `file '${file.replace(/'/g, "'\\''")}'`)
-      .join("\n");
-
-    fs.writeFileSync(listFile, listContent);
-
-    const args = [
-      "-y",
-      "-f", "concat",
-      "-safe", "0",
-      "-i", listFile,
-      "-vf",
-      "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
-      "-r", String(fps),
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-pix_fmt", "yuv420p",
-      "-movflags", "+faststart",
-      outputFile
-    ];
-
-    const ffmpeg = spawn("ffmpeg", args);
-
-    let errorText = "";
-
-    ffmpeg.stderr.on("data", data => {
-      errorText += data.toString();
-    });
-
-    ffmpeg.on("error", error => {
-      try {
-        fs.unlinkSync(listFile);
-      } catch {}
-
-      reject(
-        new Error(
-          `FFmpeg could not start. Make sure FFmpeg is installed. ${error.message}`
-        )
-      );
-    });
-
-    ffmpeg.on("close", code => {
-      try {
-        fs.unlinkSync(listFile);
-      } catch {}
-
-      if (code === 0) {
-        resolve(outputFile);
-      } else {
-        reject(
-          new Error(
-            `FFmpeg failed: ${errorText.slice(-3000)}`
-          )
+function renderVideo(
+  sceneFiles,
+  outputFile,
+  fps = 30
+) {
+  return new Promise(
+    (resolve, reject) => {
+      const listFile =
+        path.join(
+          videoDir,
+          `${crypto.randomUUID()}.txt`
         );
-      }
-    });
-  });
+
+      const listContent =
+        sceneFiles
+          .map(
+            (file) =>
+              `file '${file.replace(
+                /'/g,
+                "'\\''"
+              )}'`
+          )
+          .join("\n");
+
+      fs.writeFileSync(
+        listFile,
+        listContent
+      );
+
+      const args = [
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        listFile,
+        "-vf",
+        "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+        "-r",
+        String(fps),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        outputFile
+      ];
+
+      const ffmpeg =
+        spawn(
+          "ffmpeg",
+          args
+        );
+
+      let errorText = "";
+
+      ffmpeg.stderr.on(
+        "data",
+        (data) => {
+          errorText +=
+            data.toString();
+        }
+      );
+
+      ffmpeg.on(
+        "error",
+        (error) => {
+          try {
+            fs.unlinkSync(
+              listFile
+            );
+          } catch {}
+
+          reject(
+            new Error(
+              `FFmpeg could not start. Make sure FFmpeg is installed. ${error.message}`
+            )
+          );
+        }
+      );
+
+      ffmpeg.on(
+        "close",
+        (code) => {
+          try {
+            fs.unlinkSync(
+              listFile
+            );
+          } catch {}
+
+          if (code === 0) {
+            resolve(outputFile);
+          } else {
+            reject(
+              new Error(
+                `FFmpeg failed: ${errorText.slice(
+                  -3000
+                )}`
+              )
+            );
+          }
+        }
+      );
+    }
+  );
 }
 
-app.post("/api/video/render", async (req, res) => {
-  try {
-    const { plan } = req.body || {};
+/* ================= VIDEO RENDER API ================= */
 
-    if (!plan || !Array.isArray(plan.scenes)) {
-      return res.status(400).json({
-        ok: false,
-        error: "A valid video plan is required."
-      });
-    }
+app.post(
+  "/api/video/render",
+  async (req, res) => {
+    try {
+      const { plan } =
+        req.body || {};
 
-    const id = crypto.randomUUID();
-    const title = plan.title || "NOVAAA Video";
+      if (
+        !plan ||
+        !Array.isArray(
+          plan.scenes
+        )
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "A valid video plan is required."
+        });
+      }
 
-    const sceneFiles = [];
+      const id =
+        crypto.randomUUID();
 
-    for (let i = 0; i < plan.scenes.length; i++) {
-      const scene = plan.scenes[i];
+      const title =
+        plan.title ||
+        "NOVAAA Video";
 
-      const svg = createSceneSVG(
-        scene,
-        plan.scenes.length,
+      const sceneFiles = [];
+
+      for (
+        let i = 0;
+        i < plan.scenes.length;
+        i++
+      ) {
+        const scene =
+          plan.scenes[i];
+
+        const svg =
+          createSceneSVG(
+            scene,
+            plan.scenes.length,
+            title
+          );
+
+        const file =
+          path.join(
+            sceneDir,
+            `${id}-${i + 1}.svg`
+          );
+
+        fs.writeFileSync(
+          file,
+          svg
+        );
+
+        sceneFiles.push(file);
+      }
+
+      const output =
+        path.join(
+          videoDir,
+          `${id}.mp4`
+        );
+
+      await renderVideo(
+        sceneFiles,
+        output
+      );
+
+      res.json({
+        ok: true,
+        message:
+          "NOVAAA created the video.",
+        video:
+          `/generated/videos/${id}.mp4`,
+        downloadUrl:
+          `/generated/videos/${id}.mp4`,
         title
+      });
+    } catch (error) {
+      console.error(
+        "VIDEO RENDER ERROR:",
+        error
       );
 
-      const file = path.join(
-        sceneDir,
-        `${id}-${i + 1}.svg`
-      );
-
-      fs.writeFileSync(file, svg);
-      sceneFiles.push(file);
-    }
-
-    const output = path.join(
-      videoDir,
-      `${id}.mp4`
-    );
-
-    await renderVideo(sceneFiles, output);
-
-    res.json({
-      ok: true,
-      message: "NOVAAA created the video.",
-      video: `/generated/videos/${id}.mp4`,
-      downloadUrl: `/generated/videos/${id}.mp4`,
-      title
-    });
-
-  } catch (error) {
-    console.error("VIDEO RENDER ERROR:", error);
-
-    res.status(500).json({
-      ok: false,
-      error: error.message || "Video rendering failed."
-    });
-  }
-});
-
-/* One-click video */
-
-app.post("/api/video/create", async (req, res) => {
-  try {
-    const {
-      prompt,
-      duration = 30,
-      language = "English",
-      style = "cinematic"
-    } = req.body || {};
-
-    if (!prompt) {
-      return res.status(400).json({
+      res.status(500).json({
         ok: false,
-        error: "Enter a video idea."
+        error:
+          error.message ||
+          "Video rendering failed."
       });
     }
+  }
+);
 
-    const sceneCount = Math.max(
-      3,
-      Math.min(8, Math.ceil(Number(duration) / 6))
-    );
+/* ================= ONE CLICK VIDEO ================= */
 
-    const planningPrompt = `
+app.post(
+  "/api/video/create",
+  async (req, res) => {
+    try {
+      const {
+        prompt,
+        duration = 30,
+        language = "English",
+        style = "cinematic"
+      } = req.body || {};
+
+      if (!prompt) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Enter a video idea."
+        });
+      }
+
+      const sceneCount =
+        Math.max(
+          3,
+          Math.min(
+            8,
+            Math.ceil(
+              Number(duration) /
+                6
+            )
+          )
+        );
+
+      const planningPrompt = `
 You are NOVAAA AI Video Director.
 
 Create a ${duration}-second ${style} video.
@@ -860,74 +1116,163 @@ Return ONLY JSON:
 }
 `;
 
-    const raw = await askGemini(
-      planningPrompt,
-      mainPrompt
-    );
+      const raw =
+        await askGemini(
+          planningPrompt,
+          mainPrompt
+        );
 
-    let plan;
+      let plan;
 
-    try {
-      plan = JSON.parse(
-        raw
-          .replace(/```json/gi, "")
-          .replace(/```/g, "")
-          .trim()
+      try {
+        plan =
+          JSON.parse(
+            raw
+              .replace(
+                /```json/gi,
+                ""
+              )
+              .replace(
+                /```/g,
+                ""
+              )
+              .trim()
+          );
+      } catch {
+        plan = {
+          title:
+            "NOVAAA AI Video",
+          scenes:
+            Array.from(
+              {
+                length:
+                  sceneCount
+              },
+              (_, i) => ({
+                number: i + 1,
+                duration:
+                  Math.round(
+                    Number(
+                      duration
+                    ) /
+                      sceneCount
+                  ),
+                visual:
+                  `${prompt} — cinematic scene ${
+                    i + 1
+                  }`,
+                camera:
+                  "slow cinematic movement",
+                narration: "",
+                sound:
+                  "cinematic ambience"
+              })
+            )
+        };
+      }
+
+      const id =
+        crypto.randomUUID();
+
+      const sceneFiles = [];
+
+      for (
+        let i = 0;
+        i < plan.scenes.length;
+        i++
+      ) {
+        const file =
+          path.join(
+            sceneDir,
+            `${id}-${i + 1}.svg`
+          );
+
+        fs.writeFileSync(
+          file,
+          createSceneSVG(
+            plan.scenes[i],
+            plan.scenes.length,
+            plan.title ||
+              "NOVAAA AI Video"
+          )
+        );
+
+        sceneFiles.push(file);
+      }
+
+      const output =
+        path.join(
+          videoDir,
+          `${id}.mp4`
+        );
+
+      await renderVideo(
+        sceneFiles,
+        output
       );
-    } catch {
-      plan = {
-        title: "NOVAAA AI Video",
-        scenes: Array.from(
-          { length: sceneCount },
-          (_, i) => ({
-            number: i + 1,
-            duration: Math.round(
-              Number(duration) / sceneCount
-            ),
-            visual: `${prompt} — cinematic scene ${i + 1}`,
-            camera: "slow cinematic movement",
-            narration: "",
-            sound: "cinematic ambience"
-          })
-        )
-      };
+
+      res.json({
+        ok: true,
+        title: plan.title,
+        plan,
+        video:
+          `/generated/videos/${id}.mp4`,
+        downloadUrl:
+          `/generated/videos/${id}.mp4`
+      });
+    } catch (error) {
+      console.error(
+        "ONE CLICK VIDEO ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        ok: false,
+        error:
+          error.message ||
+          "Could not create video."
+      });
     }
+  }
+);
 
-    const id = crypto.randomUUID();
-    const sceneFiles = [];
+/* ================= SERVER ================= */
 
-    for (let i = 0; i < plan.scenes.length; i++) {
-      const file = path.join(
-        sceneDir,
-        `${id}-${i + 1}.svg`
-      );
+app.get("*", (req, res) => {
+  res.sendFile(
+    path.join(
+      dir,
+      "../public/index.html"
+    )
+  );
+});
 
-      fs.writeFileSync(
-        file,
-        createSceneSVG(
-          plan.scenes[i],
-          plan.scenes.length,
-          plan.title || "NOVAAA AI Video"
-        )
-      );
+app.listen(port, () => {
+  console.log(
+    "--------------------------------"
+  );
 
-      sceneFiles.push(file);
-    }
+  console.log(
+    "NOVAAA AI V4.0.0"
+  );
 
-    const output = path.join(
-      videoDir,
-      `${id}.mp4`
-    );
+  console.log(
+    `Server running on port ${port}`
+  );
 
-    await renderVideo(sceneFiles, output);
+  console.log(
+    `Features listed: ${features.length}`
+  );
 
-    res.json({
-      ok: true,
-      title: plan.title,
-      plan,
-      video: `/generated/videos/${id}.mp4`,
-      downloadUrl: `/generated/videos/${id}.mp4`
-    });
+  console.log(
+    "Video Engine: ENABLED"
+  );
 
-  } catch (error) {
-    console.error("ONE CLICK VIDEO E
+  console.log(
+    "Video Renderer: FFmpeg"
+  );
+
+  console.log(
+    "--------------------------------"
+  );
+});
